@@ -97,12 +97,16 @@ no pending APU IRQ or raised IRQL. Evidence is in its `-verification.json`.
 Candidate147's first release-on probe (`perf147_release_on_1`) failed the route:
 completed flips stopped near103s at the title screen, leaving all timed windows
 without completed frames. The harness rejected it and stopped subsequent runs.
-The diagnostic snapshot/samples show the guest main thread waiting through
-`sub_0014C180` in the graphics-event path and an idle executor; no D3D sync
+The diagnostic snapshot/samples show the guest main thread waiting on the
+graphics event and an idle executor; no D3D sync
 failure was reported. This is not the baseline movie/DirectSound signature.
 GET/PUT and the executor's pending TLS fence list were not captured before exit,
 so the precise lost-progress cause is unresolved. Coalescing remains off; no
 speedup is claimed from this failed experiment. Its off arm completed normally.
+The later raw-data audit in `review/opus55/ANSWERS.md` identifies the event at
+device+0x196C, signaled by software-trap action5, and executor polling samples.
+The earlier attribution to `sub_0014C180` incorrectly treated a scanned stack
+symbol candidate as an unwound caller; the concrete wait is in `sub_0039EC10`.
 The first independent epoch-on run under `perf147_epoch` regressed to about
 551–557ms/frame. Linear lookup selected the first basic-identity entry before
 checking its decoder context, repeatedly evicting alternating stage contexts.
