@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include "../../src/kernel/nv2a_hw_raster.h"
 static unsigned char *memory;
 ptrdiff_t xbox_GetMemoryOffset(void){return (ptrdiff_t)memory-(ptrdiff_t)0x80000000u;}
 size_t xbox_GetMappedSize(void){return 0;}
@@ -11,6 +12,8 @@ uint32_t xbox_ContiguousAllocatedBytes(void){return 0x04000000u;}
 static uint32_t seen[16][2],count;
 static unsigned pending,syncs,releases,active,failed,observe_order,notifications,work,completed;
 static int completion_ok=1;
+static uint32_t *gpu_written_word;
+static uint32_t gpu_written_value;
 int nv2a_hw_complete(void);
 int xbox_Nv2aFenceBatchFlush(void);
 void nv2a_pb_exec_method(uint32_t channel,uint32_t method,uint32_t value)
@@ -34,6 +37,18 @@ int xbox_Nv2aFenceBatchFlush(void){if(failed)return 0;if(pending)++releases;pend
 void xbox_Nv2aFenceBatchEnd(int commit){if(commit&&!failed&&pending)++releases;active=0;}
 int nv2a_hw_sync(void){++syncs;return 1;}
 int nv2a_hw_complete(void){++syncs;if(completion_ok)completed=work;return completion_ok;}
+int nv2a_hw_sync_reason(Nv2aSyncReason reason,int depth){assert(reason==NV2A_SYNC_SEGMENT&&!depth);return nv2a_hw_complete();}
+void nv2a_hw_segment_begin(void){}
+void nv2a_hw_segment_end(void){}
+void nv2a_hw_guest_write(void){}
+int nv2a_hw_acquire_input(const void *input,size_t bytes)
+{
+    uintptr_t address=(uintptr_t)gpu_written_word,start=(uintptr_t)input;
+    if(gpu_written_word&&address>=start&&address-start<bytes) {
+        *gpu_written_word=gpu_written_value;gpu_written_word=NULL;
+    }
+    return 1;
+}
 extern void nv2a_pb_scan(uint32_t,uint32_t);
 extern void nv2a_pb_set_ring_bounds(uint32_t,uint32_t);
 extern void nv2a_pb_bind_nop_record(uint32_t,uint32_t,uint32_t);
@@ -41,6 +56,7 @@ extern void nv2a_pb_bind_nop_record(uint32_t,uint32_t,uint32_t);
 int main(void)
 {
     memory=calloc(1,0x04000000);assert(memory);_putenv_s("RECOMP_PB_EXEC","1");
+    _putenv_s("RECOMP_HW_RELEASE_COALESCE","1");
     nv2a_pb_set_ring_bounds(0x80001000,0x80001040);
     nv2a_pb_bind_nop_record(3,5,12);
     W(0x1000)=0x3001; /* Real jump into compiled geometry. */
@@ -109,5 +125,15 @@ int main(void)
     assert(syncs==5&&releases==3); /* A failed GPU barrier acknowledges nothing. */
     count=0;completion_ok=1;nv2a_pb_scan(0x80001000,0x80001008);
     assert(syncs==6&&releases==4); /* Failure state does not poison later batches. */
+    /* Command headers and parameters can consume earlier GPU output. The
+     * simulated acquisition replaces stale bytes before the parser uses them. */
+    count=0;W(0x1000)=0xFFFFFFFF;W(0x1004)=28;
+    gpu_written_word=&W(0x1000);gpu_written_value=0x41D70;
+    nv2a_pb_scan(0x80001000,0x80001008);
+    assert(!gpu_written_word&&count==1&&seen[0][0]==0x1D70&&seen[0][1]==28);
+    count=0;W(0x1000)=0x41D70;W(0x1004)=0xFFFFFFFF;
+    gpu_written_word=&W(0x1004);gpu_written_value=29;
+    nv2a_pb_scan(0x80001000,0x80001008);
+    assert(!gpu_written_word&&count==1&&seen[0][1]==29);
     free(memory);puts("Pushbuffer control and fenced GPU synchronization passed");return 0;
 }

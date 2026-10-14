@@ -10,7 +10,7 @@
 #include "nv2a_combiner_hlsl.h"
 #include "nv2a_vsh_hlsl.h"
 #define RELEASE(p,T) do { if(p) { T##_Release(p); p=NULL; } } while(0)
-enum { CACHE_SIZE=128, TEXTURE_CACHE_SIZE=512, TARGET_POOL_SIZE=8 };
+enum { CACHE_SIZE=128, TEXTURE_CACHE_SIZE=512, TEXTURE_HASH_SIZE=1024, TARGET_POOL_SIZE=8 };
 typedef struct {
     ID3D11Texture2D *texture,*readback,*upload;
     ID3D11RenderTargetView *rtv;
@@ -27,7 +27,8 @@ typedef struct {
     Nv2aHwTexture desc;
     unsigned char *copy, *palette;
     ID3D11ShaderResourceView *srv;
-    uint64_t last_used;
+    uint64_t last_used, validated_epoch;
+    uint32_t hash, next;
 } Tex;
 typedef struct {
     float window[4], fog[4], alpha[4], texinfo[4][4], clip[4],fog_params[4];
@@ -64,6 +65,8 @@ static struct {
     unsigned trace_wait_reports;
     struct {Nv2aHwState state;uint32_t vertices,indices,program_count;} trace_draw[64];
     Shader shaders[CACHE_SIZE]; Tex textures[TEXTURE_CACHE_SIZE];
+    uint32_t texture_buckets[TEXTURE_HASH_SIZE];
+    int texture_hash,texture_epoch,acquire_inputs;
     struct {uint32_t count,words[NV2A_VSH_SLOTS][4];ID3D11VertexShader *vs;ID3D11InputLayout *layout;} vertex_shaders[CACHE_SIZE];
     ID3D11SamplerState *samplers[64];
     ID3D11DepthStencilState *depth_states[16];
@@ -74,6 +77,143 @@ static struct {
     uint64_t sync_ticks,tex_calls,tex_hits,texels,tex_decode_ticks,tex_upload_ticks;
     SyncStats sync_interval;
 } g;
+static struct {uint64_t epoch;unsigned depth;} validation;
+static struct {uintptr_t contiguous,tiled;size_t bytes;} input_aliases;
+void nv2a_hw_input_aliases(void *contiguous,void *tiled,size_t tiled_bytes)
+{input_aliases.contiguous=(uintptr_t)contiguous;input_aliases.tiled=(uintptr_t)tiled;input_aliases.bytes=tiled?tiled_bytes:0;}
+static uintptr_t input_canonical(uintptr_t address)
+{
+    if(input_aliases.bytes&&address>=input_aliases.tiled&&address-input_aliases.tiled<input_aliases.bytes)
+        return input_aliases.contiguous+(address-input_aliases.tiled);
+    return address;
+}
+int nv2a_hw_acquire_input(const void *input,size_t bytes)
+{
+    if(!g.acquire_inputs||!bytes)return 1;
+    if(g.depth_dirty&&g.depth_target.depth) {
+        uintptr_t a=(uintptr_t)input,b=(uintptr_t)g.depth_target.depth;
+        size_t depth_bytes=(size_t)g.depth_target.height*1024*sizeof(float);
+        if(a>=b?a-b<depth_bytes:b-a<bytes)return nv2a_hw_sync_reason(NV2A_SYNC_INPUT,1);
+    }
+    if(g.color_dirty) {
+        uintptr_t a=input_canonical((uintptr_t)input),b=input_canonical((uintptr_t)g.target.color);
+        size_t target_bytes=(size_t)g.target.pitch*g.target.height;
+        if(a>=b?a-b<target_bytes:b-a<bytes)return nv2a_hw_sync_reason(NV2A_SYNC_INPUT,0);
+    }
+    return 1;
+}
+void nv2a_hw_guest_write(void)
+{
+    if(!++validation.epoch) {
+        validation.epoch=1;
+        for(unsigned i=0;i<TEXTURE_CACHE_SIZE;i++)g.textures[i].validated_epoch=0;
+    }
+}
+static struct {
+    int configured, enabled;
+    uint64_t events[NV2A_PERF_EVENT_COUNT], segments, releases, segment_depth;
+    uint64_t release_histogram[9], color, depth, fences, trap_ticks;
+    uint64_t texture_compare_bytes, snapshot_compare_bytes, vertex_upload_bytes;
+    uint64_t report_id, last_report_ms;
+    struct { uint64_t calls, failed, ticks, outcomes[8]; } sync[NV2A_SYNC_REASON_COUNT];
+    struct { uint32_t width, height, bpp; uint64_t count; } targets[32];
+    uint64_t target_overflow;
+} perf;
+static int perf_enabled(void)
+{
+    if(!perf.configured) {
+        perf.configured=1;
+        perf.enabled=getenv("RECOMP_HW_COUNTERS")!=NULL;
+    }
+    return perf.enabled;
+}
+void nv2a_hw_segment_begin(void)
+{
+    if(!validation.depth++)nv2a_hw_guest_write();
+    if(!perf_enabled())return;
+    if(!perf.segment_depth++){++perf.segments;perf.releases=0;}
+}
+void nv2a_hw_segment_end(void)
+{
+    if(validation.depth)--validation.depth;
+    if(!perf_enabled()||!perf.segment_depth)return;
+    if(!--perf.segment_depth)++perf.release_histogram[perf.releases<8?perf.releases:8];
+}
+void nv2a_hw_perf_event(Nv2aPerfEvent event)
+{
+    if(!perf_enabled()||(unsigned)event>=NV2A_PERF_EVENT_COUNT)return;
+    ++perf.events[event];
+    if(event==NV2A_PERF_RELEASE&&perf.segment_depth)++perf.releases;
+}
+void nv2a_hw_perf_trap_wait(uint64_t ticks)
+{if(perf_enabled())perf.trap_ticks+=ticks;}
+void nv2a_hw_perf_report(void)
+{
+    static const char *const reasons[]={"release","trap","idle","flip","clear","target","depth","cpu","segment","shutdown","report","input"};
+    static const char *const events[]={"releases","traps","wait_for_idle","flips","clears","ack_idle"};
+    LARGE_INTEGER frequency,clock;
+    FILETIME created={0},exited={0},kernel={0},user={0};
+    ULARGE_INTEGER k,u;
+    if(!perf_enabled())return;
+    uint64_t now=GetTickCount64();
+    if(now-perf.last_report_ms<2000)return;
+    perf.last_report_ms=now;
+    QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&clock);
+    int cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user);
+    k.LowPart=kernel.dwLowDateTime;k.HighPart=kernel.dwHighDateTime;
+    u.LowPart=user.dwLowDateTime;u.HighPart=user.dwHighDateTime;
+    double ms=1000.0/frequency.QuadPart;
+    /* Audio and guest diagnostics share stderr. Keep the JSON packet atomic. */
+    _lock_file(stderr);
+    fprintf(stderr,"[HW COUNTERS] {\"version\":1,\"report\":%llu,\"qpc_ms\":%.3f,\"thread_id\":%lu,\"executor_cpu_ms\":",
+        (unsigned long long)++perf.report_id,clock.QuadPart*ms,GetCurrentThreadId());
+    if(cpu_valid)fprintf(stderr,"%.3f",(k.QuadPart+u.QuadPart)/10000.0);else fputs("null",stderr);
+    fprintf(stderr,",\"draws\":%llu,\"segments\":%llu,\"color\":%llu,\"depth\":%llu,\"fences\":%llu,\"trap_ms\":%.3f,\"texture_compare_bytes\":%llu,\"snapshot_compare_bytes\":%llu,\"vertex_upload_bytes\":%llu",
+        (unsigned long long)g.draws,(unsigned long long)perf.segments,
+        (unsigned long long)perf.color,(unsigned long long)perf.depth,(unsigned long long)perf.fences,
+        perf.trap_ticks*ms,(unsigned long long)perf.texture_compare_bytes,
+        (unsigned long long)perf.snapshot_compare_bytes,(unsigned long long)perf.vertex_upload_bytes);
+    for(unsigned i=0;i<NV2A_PERF_EVENT_COUNT;i++)fprintf(stderr,",\"%s\":%llu",events[i],(unsigned long long)perf.events[i]);
+    fputs(",\"release_histogram\":[",stderr);
+    for(unsigned i=0;i<9;i++)fprintf(stderr,"%s%llu",i?",":"",(unsigned long long)perf.release_histogram[i]);
+    fputs("],\"sync\":{",stderr);
+    for(unsigned i=0;i<NV2A_SYNC_REASON_COUNT;i++) {
+        fprintf(stderr,"%s\"%s\":{\"calls\":%llu,\"failed\":%llu,\"ms\":%.3f,\"outcomes\":[",i?",":"",reasons[i],
+            (unsigned long long)perf.sync[i].calls,(unsigned long long)perf.sync[i].failed,perf.sync[i].ticks*ms);
+        for(unsigned j=0;j<8;j++)fprintf(stderr,"%s%llu",j?",":"",(unsigned long long)perf.sync[i].outcomes[j]);
+        fputs("]}",stderr);
+    }
+    fputs("},\"targets\":[",stderr);
+    unsigned count=0;
+    for(unsigned i=0;i<32;i++)if(perf.targets[i].count) {
+        fprintf(stderr,"%s{\"width\":%u,\"height\":%u,\"bpp\":%u,\"count\":%llu}",count++?",":"",
+            perf.targets[i].width,perf.targets[i].height,perf.targets[i].bpp,(unsigned long long)perf.targets[i].count);
+    }
+    fprintf(stderr,"],\"target_overflow\":%llu}\n",(unsigned long long)perf.target_overflow);
+    _unlock_file(stderr);
+}
+static int compared(const void *a,const void *b,size_t bytes,int snapshot)
+{
+    if(perf_enabled()) {
+        if(snapshot)perf.snapshot_compare_bytes+=bytes;else perf.texture_compare_bytes+=bytes;
+    }
+    return memcmp(a,b,bytes);
+}
+static void stop_for_device_loss(const char *operation,HRESULT reason)
+{
+    if(FAILED(reason)) {
+        fprintf(stderr,"[HW FATAL] D3D11 device removed during %s, reason=%08lX; stopping before stale fences can hang the guest\n",operation,reason);
+        fflush(stderr);ExitProcess(2);
+    }
+}
+static void check_device_removed(const char *operation)
+{
+    if(g.device)stop_for_device_loss(operation,ID3D11Device_GetDeviceRemovedReason(g.device));
+}
+#ifdef NV2A_HW_TEST_DEVICE_LOSS
+void nv2a_hw_test_device_loss(void)
+{stop_for_device_loss("injected device loss",DXGI_ERROR_DEVICE_REMOVED);}
+#endif
 static ID3DBlob *compile(const char *code, const char *profile)
 {
     ID3DBlob *blob=NULL,*errors=NULL;
@@ -114,11 +254,14 @@ static int init(void)
     D3D11_RASTERIZER_DESC rd={0};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.ScissorEnable=TRUE;
     if(SUCCEEDED(hr)) hr=ID3D11Device_CreateRasterizerState(g.device,&rd,&g.raster);
     if(FAILED(hr)){g.failed=1;return 0;}
-    g.profile=getenv("RECOMP_GPU_TIMING")!=NULL;
+    g.profile=getenv("RECOMP_GPU_TIMING")!=NULL||getenv("RECOMP_HW_CPU_TIMING")!=NULL;
     g.retain_color=getenv("RECOMP_HW_COLOR_RELOAD")==NULL;
     g.pool_targets=getenv("RECOMP_HW_TARGET_POOL")!=NULL&&getenv("RECOMP_HW_TARGET_POOL_DISABLE")==NULL;
     g.bulk_readback=getenv("RECOMP_HW_BULK_READBACK")!=NULL;
     g.readback_fence=getenv("RECOMP_HW_READBACK_FENCE")!=NULL;
+    g.texture_hash=getenv("RECOMP_HW_TEXTURE_HASH")!=NULL;
+    g.texture_epoch=getenv("RECOMP_HW_TEXTURE_EPOCH")!=NULL;
+    g.acquire_inputs=getenv("RECOMP_HW_RELEASE_COALESCE")!=NULL&&getenv("RECOMP_HW_RELEASE_BARRIER")==NULL;
     g.trace_gpu=getenv("RECOMP_HW_GPU_TRACE")!=NULL;
     if(g.trace_gpu) {
         D3D11_QUERY_DESC q={D3D11_QUERY_TIMESTAMP_DISJOINT,0};
@@ -237,6 +380,7 @@ static int map_readback(ID3D11Texture2D *resource,D3D11_MAPPED_SUBRESOURCE *map,
         }while(hr==DXGI_ERROR_WAS_STILL_DRAWING);
     }
     QueryPerformanceCounter(&ended);++g.sync_interval.readbacks[plane];
+    if(perf_enabled()){if(plane)++perf.depth;else ++perf.color;}
     g.sync_interval.map_ticks[plane]+=ended.QuadPart-began.QuadPart;
     if(FAILED(hr))fprintf(stderr,"[HW READBACK] Map failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
     return SUCCEEDED(hr);
@@ -311,6 +455,7 @@ static int wait_completion(void)
         }while(hr==S_FALSE);
     }
     QueryPerformanceCounter(&ended);++g.sync_interval.fences;
+    if(perf_enabled())++perf.fences;
     g.sync_interval.fence_ticks+=ended.QuadPart-began.QuadPart;
     if(hr!=S_OK) {
         fprintf(stderr,"[HW FENCE] completion failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
@@ -371,6 +516,7 @@ static int synchronize(int read_managed_depth)
     ID3D11DeviceContext_Unmap(g.ctx,(ID3D11Resource*)g.color_read,0);
     QueryPerformanceCounter(&ended);g.sync_interval.copy_ticks[0]+=ended.QuadPart-copied.QuadPart;
     g.color_cpu_valid=g.target.bpp==4&&g.color_cpu_copy!=NULL;
+    nv2a_hw_guest_write();
     }
     if(download_depth) {
         if(!map_readback(g.depth_read,&map,1))return 0;
@@ -380,6 +526,7 @@ static int synchronize(int read_managed_depth)
         ID3D11DeviceContext_Unmap(g.ctx,(ID3D11Resource*)g.depth_read,0);
         QueryPerformanceCounter(&ended);g.sync_interval.copy_ticks[1]+=ended.QuadPart-copied.QuadPart;
         g.depth_dirty=0;
+        nv2a_hw_guest_write();
     } else if(!g.color_dirty&&g.completed_draws!=g.draws) {
         /* Depth-only work still needs actual GPU completion before the
          * guest semaphore is published, even without a depth readback. */
@@ -394,15 +541,40 @@ static int synchronize(int read_managed_depth)
     if(g.syncs%500==0)report_sync_stats();
     return 1;
 }
-int nv2a_hw_sync(void){return synchronize(1);}
-int nv2a_hw_complete(void){return synchronize(0);}
+int nv2a_hw_sync_reason(Nv2aSyncReason reason,int read_managed_depth)
+{
+    if(!perf_enabled()) {
+        int result=synchronize(read_managed_depth);
+        if(!result)check_device_removed("synchronization");
+        return result;
+    }
+    if((unsigned)reason>=NV2A_SYNC_REASON_COUNT)reason=NV2A_SYNC_CPU;
+    LARGE_INTEGER began,ended;QueryPerformanceCounter(&began);
+    uint64_t color=perf.color,depth=perf.depth,fences=perf.fences;
+    int result=synchronize(read_managed_depth);
+    if(!result)check_device_removed("synchronization");
+    QueryPerformanceCounter(&ended);
+    unsigned outcome=(perf.color!=color?1:0)|(perf.depth!=depth?2:0)|(perf.fences!=fences?4:0);
+    ++perf.sync[reason].calls;++perf.sync[reason].outcomes[outcome];
+    perf.sync[reason].failed+=!result;perf.sync[reason].ticks+=ended.QuadPart-began.QuadPart;
+    return result;
+}
+int nv2a_hw_sync(void){return nv2a_hw_sync_reason(NV2A_SYNC_CPU,1);}
+int nv2a_hw_complete(void){return nv2a_hw_sync_reason(NV2A_SYNC_CPU,0);}
 static int target(const Nv2aHwState *s)
 {
     HRESULT hr=S_OK;uint32_t x,y;D3D11_TEXTURE2D_DESC td={0};
     int depth_active=s->depth&&s->depth_test;
     if(g.target.surface!=s->surface||g.target.width!=s->width||g.target.height!=s->height||g.target.bpp!=s->bpp||g.target.color!=s->color||g.target.pitch!=s->pitch) {
-        if(!nv2a_hw_sync())return 0;
-        if(g.color&&g.target.width==s->width&&g.target.height==s->height&&g.target.bpp==s->bpp) {
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_TARGET,1))return 0;
+        if(perf_enabled()) {
+            unsigned i;
+            for(i=0;i<32;i++)if(!perf.targets[i].count ||
+                (perf.targets[i].width==s->width&&perf.targets[i].height==s->height&&perf.targets[i].bpp==s->bpp))break;
+            if(i==32)++perf.target_overflow;
+            else {perf.targets[i].width=s->width;perf.targets[i].height=s->height;perf.targets[i].bpp=s->bpp;++perf.targets[i].count;}
+        }
+        if(g.color&&g.rtv&&g.color_read&&g.target.width==s->width&&g.target.height==s->height&&g.target.bpp==s->bpp) {
             /* The old guest backing is coherent before its native allocation
              * is reused. No bytes or CPU snapshot belong to the new target
              * until its own upload/readback has populated them. */
@@ -411,8 +583,8 @@ static int target(const Nv2aHwState *s)
         } else retire_color();
     }
     if(depth_active&&(g.depth_target.zeta!=s->zeta||g.depth_target.width!=s->width||g.depth_target.height!=s->height||g.depth_target.depth_scale!=s->depth_scale||g.depth_target.depth!=s->depth)) {
-        if(!nv2a_hw_sync())return 0;
-        if(g.depth&&g.depth_target.width==s->width&&g.depth_target.height==s->height) {
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_DEPTH,1))return 0;
+        if(g.depth&&g.dsv&&g.depth_read&&g.depth_upload&&g.depth_target.width==s->width&&g.depth_target.height==s->height) {
             g.depth_loaded=0;
             ++g.sync_interval.reuses[1];
         } else retire_depth();
@@ -421,7 +593,7 @@ static int target(const Nv2aHwState *s)
         /* Resolve CPU depth changes before uploading color. A no-draw sync
          * can conservatively invalidate an unsnapshotted color upload, so it
          * must not run between that upload and its first submitted draw. */
-        if(!nv2a_hw_sync())return 0;
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_DEPTH,1))return 0;
         g.depth_loaded=0;
     }
     if(!g.color)acquire_storage(0,s);
@@ -434,6 +606,7 @@ static int target(const Nv2aHwState *s)
         if(SUCCEEDED(hr))hr=ID3D11Device_CreateTexture2D(g.device,&td,NULL,&g.color_read);
         if(FAILED(hr)) {
             fprintf(stderr,"[HW TARGET] color allocation failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
+            check_device_removed("color allocation");
             return 0;
         }
         ++g.sync_interval.allocations[0];
@@ -441,8 +614,8 @@ static int target(const Nv2aHwState *s)
     if(g.color_cpu_check && (s->color_mask&0x01010101u)) {
         /* GPU and CPU contain the same bytes after readback. Keep the GPU
          * copy unless the CPU changed its backing before the next draw. */
-        for(y=0;y<s->height;y++)if(memcmp(s->color+(size_t)y*s->pitch,
-             g.color_cpu_copy+(size_t)y*s->width*4,s->width*4)) {g.color_loaded=0;break;}
+        for(y=0;y<s->height;y++)if(compared(s->color+(size_t)y*s->pitch,
+             g.color_cpu_copy+(size_t)y*s->width*4,s->width*4,1)) {g.color_loaded=0;break;}
         g.color_cpu_check=0;
     }
     if(!g.color_loaded&&(s->color_mask&0x01010101u)) {
@@ -478,6 +651,7 @@ static int target(const Nv2aHwState *s)
             if(SUCCEEDED(hr))hr=ID3D11Device_CreateTexture2D(g.device,&td,NULL,&g.depth_upload);
             if(FAILED(hr)) {
                 fprintf(stderr,"[HW TARGET] depth allocation failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
+                check_device_removed("depth allocation");
                 return 0;
             }
             ++g.sync_interval.allocations[1];
@@ -498,17 +672,64 @@ static int target(const Nv2aHwState *s)
     }
     return 1;
 }
+static int texture_identity(const Nv2aHwTexture *a,const Nv2aHwTexture *b)
+{
+    return a->raw==b->raw&&a->raw_bytes==b->raw_bytes&&a->palette==b->palette&&
+        a->palette_bytes==b->palette_bytes&&a->format==b->format&&a->width==b->width&&
+        a->height==b->height&&a->cube==b->cube&&a->linear==b->linear&&
+        a->levels==b->levels&&a->bgra_pitch==b->bgra_pitch&&a->source_pitch==b->source_pitch&&a->sample==b->sample&&
+        a->sample_mip==b->sample_mip&&a->opaque==b->opaque;
+}
+static uint32_t texture_hash(const Nv2aHwTexture *t)
+{
+    /* Hash explicit fields, never struct padding. Equality resolves collisions. */
+    uint64_t fields[]={(uintptr_t)t->raw,t->raw_bytes,(uintptr_t)t->palette,
+        t->palette_bytes,t->format,t->width,t->height,t->cube,t->linear,t->levels,
+        t->bgra_pitch,t->source_pitch,(uintptr_t)t->sample,(uintptr_t)t->sample_mip,(uintptr_t)t->opaque};
+    uint32_t hash=2166136261u;
+    for(unsigned i=0;i<sizeof fields/sizeof fields[0];i++) {
+        uint64_t value=fields[i];
+        hash=(hash^(uint32_t)value^(uint32_t)(value>>32))*16777619u;
+    }
+    /* Mix aligned pointer bits before selecting a power-of-two bucket. */
+    hash^=hash>>16;hash*=0x85ebca6bu;hash^=hash>>13;hash*=0xc2b2ae35u;
+    return hash^(hash>>16);
+}
+static void texture_unlink(Tex *entry)
+{
+    if(!g.texture_hash)return;
+    uint32_t index=(uint32_t)(entry-g.textures)+1;
+    uint32_t *link=&g.texture_buckets[entry->hash&(TEXTURE_HASH_SIZE-1)];
+    while(*link&&*link!=index)link=&g.textures[*link-1].next;
+    if(*link)*link=entry->next;
+    entry->next=0;
+}
 static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
 {
+    if(!nv2a_hw_acquire_input(t->raw,t->raw_bytes)||
+       !nv2a_hw_acquire_input(t->palette,t->palette_bytes))return NULL;
     LARGE_INTEGER started,decoded,ended;QueryPerformanceCounter(&started);++g.tex_calls;
     Tex *entry=NULL;unsigned i;uint32_t w=t->width?t->width:1,h=t->height?t->height:1,faces=t->cube?6:1,x,y,f;
     uint32_t levels=t->sample_mip&&t->levels?t->levels:1,max_levels=1;
     for(uint32_t dim=w>h?w:h;dim>1;dim>>=1)++max_levels;
     if(levels>max_levels)levels=max_levels;
     if(levels>16)levels=16;
-    for(i=0;i<TEXTURE_CACHE_SIZE;i++)if(g.textures[i].srv &&g.textures[i].desc.raw==t->raw&&g.textures[i].desc.format==t->format&&g.textures[i].desc.width==t->width&&g.textures[i].desc.height==t->height&&g.textures[i].desc.cube==t->cube&&g.textures[i].desc.linear==t->linear&&g.textures[i].desc.levels==t->levels&&g.textures[i].desc.bgra_pitch==t->bgra_pitch){entry=&g.textures[i];break;}
-    if(entry &&entry->desc.raw_bytes==t->raw_bytes&&entry->desc.palette_bytes==t->palette_bytes&&
-        (!t->raw_bytes||!memcmp(entry->copy,t->raw,t->raw_bytes))&&(!t->palette_bytes||!memcmp(entry->palette,t->palette,t->palette_bytes))){++g.tex_hits;entry->last_used=g.tex_calls;return entry->srv;}
+    uint32_t hash=g.texture_hash?texture_hash(t):0;
+    if(g.texture_hash) {
+        for(uint32_t link=g.texture_buckets[hash&(TEXTURE_HASH_SIZE-1)];link;link=g.textures[link-1].next) {
+            Tex *candidate=&g.textures[link-1];
+            if(candidate->srv&&candidate->hash==hash&&texture_identity(&candidate->desc,t)){entry=candidate;break;}
+        }
+    } else for(i=0;i<TEXTURE_CACHE_SIZE;i++)if(g.textures[i].srv &&g.textures[i].desc.raw==t->raw&&g.textures[i].desc.format==t->format&&g.textures[i].desc.width==t->width&&g.textures[i].desc.height==t->height&&g.textures[i].desc.cube==t->cube&&g.textures[i].desc.linear==t->linear&&g.textures[i].desc.levels==t->levels&&g.textures[i].desc.bgra_pitch==t->bgra_pitch&&(!g.texture_epoch||texture_identity(&g.textures[i].desc,t))){entry=&g.textures[i];break;}
+    int same_epoch=entry&&g.texture_epoch&&validation.depth&&
+        entry->validated_epoch==validation.epoch&&texture_identity(&entry->desc,t);
+    if(entry &&(!g.texture_epoch||texture_identity(&entry->desc,t))&&
+        entry->desc.raw_bytes==t->raw_bytes&&entry->desc.palette_bytes==t->palette_bytes&&
+        (same_epoch||((!t->raw_bytes||!compared(entry->copy,t->raw,t->raw_bytes,0))&&(!t->palette_bytes||!compared(entry->palette,t->palette,t->palette_bytes,0))))){
+        ++g.tex_hits;entry->last_used=g.tex_calls;
+        entry->validated_epoch=texture_identity(&entry->desc,t)?validation.epoch:0;
+        return entry->srv;
+    }
     if(!entry) {
         entry=&g.textures[0];
         for(i=0;i<TEXTURE_CACHE_SIZE;i++) {
@@ -517,6 +738,7 @@ static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
         }
     }
     entry->last_used=g.tex_calls;
+    texture_unlink(entry);entry->validated_epoch=0;
     RELEASE(entry->srv,ID3D11ShaderResourceView);free(entry->copy);free(entry->palette);entry->copy=entry->palette=NULL;
     entry->desc=*t;
     if(t->raw_bytes){entry->copy=malloc(t->raw_bytes);if(!entry->copy)return NULL;memcpy(entry->copy,t->raw,t->raw_bytes);}
@@ -544,6 +766,14 @@ static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
     D3D11_SHADER_RESOURCE_VIEW_DESC vd={0};vd.Format=td.Format;vd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;vd.Texture2DArray.MipLevels=levels;vd.Texture2DArray.ArraySize=faces;
     if(SUCCEEDED(hr))hr=ID3D11Device_CreateShaderResourceView(g.device,(ID3D11Resource*)resource,&vd,&entry->srv);
     RELEASE(resource,ID3D11Texture2D);++g.uploads;QueryPerformanceCounter(&ended);g.tex_upload_ticks+=ended.QuadPart-decoded.QuadPart;
+    if(SUCCEEDED(hr)) {
+        entry->validated_epoch=validation.epoch;
+        if(g.texture_hash) {
+            unsigned bucket=hash&(TEXTURE_HASH_SIZE-1);
+            entry->hash=hash;entry->next=g.texture_buckets[bucket];
+            g.texture_buckets[bucket]=(uint32_t)(entry-g.textures)+1;
+        }
+    }
     if(g.uploads%500==0){LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW TEXTURE] calls=%llu hits=%llu uploads=%llu direct=%llu decode %.2f ms/upload upload %.2f ms/upload last=%p %ux%u fmt=%02X texels=%llu\n",(unsigned long long)g.tex_calls,(unsigned long long)g.tex_hits,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads,g.tex_decode_ticks*1000.0/freq.QuadPart/g.uploads,g.tex_upload_ticks*1000.0/freq.QuadPart/g.uploads,t->raw,w,h,t->format,(unsigned long long)g.texels);}
     return FAILED(hr)?NULL:entry->srv;
 }
@@ -671,6 +901,8 @@ static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32
     LARGE_INTEGER phase[7];
     unsigned i;HRESULT hr;ID3D11ShaderResourceView *views[4]={0};ID3D11SamplerState *samplers[4];
     if(!nv2a_hw_enabled()||!s->color||!s->width||!s->height||s->width>1024||s->height>1024||!count||!ni||s->depth_scale<=0||(s->bpp!=2&&s->bpp!=4))return 0;
+    if(!nv2a_hw_acquire_input(v,(size_t)count*vertex_stride)||
+       !nv2a_hw_acquire_input(indices,(size_t)ni*4))return 0;
     int ca=s->blend_src==0x8003||s->blend_src==0x8004||s->blend_dst==0x8003||s->blend_dst==0x8004;
     int cc=s->blend_src==0x8001||s->blend_src==0x8002||s->blend_dst==0x8001||s->blend_dst==0x8002;
     if(ca&&cc)return 0;
@@ -699,6 +931,7 @@ static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32
     if(g.profile)QueryPerformanceCounter(&phase[3]);
     uint32_t vb_offset,ib_offset;
     if(!stream(&g.vb,&g.vb_bytes,&g.vb_cursor,count*vertex_stride,D3D11_BIND_VERTEX_BUFFER,v,&vb_offset)||!stream(&g.ib,&g.ib_bytes,&g.ib_cursor,ni*4,D3D11_BIND_INDEX_BUFFER,indices,&ib_offset))goto failed;
+    if(perf_enabled())perf.vertex_upload_bytes+=(uint64_t)count*vertex_stride;
     if(g.profile)QueryPerformanceCounter(&phase[4]);
     Nv2aRcGpuConstants rc;nv2a_rc_gpu_constants(&s->rc,&rc);Aux aux={0};aux.window[0]=(float)s->width;aux.window[1]=(float)s->height;aux.window[2]=s->depth_scale;memcpy(aux.fog,s->fog,16);aux.alpha[0]=(float)s->alpha_test;aux.alpha[1]=(float)s->alpha_func;aux.alpha[2]=(float)(s->alpha_ref&255);aux.clip[0]=(float)s->clip_plane_mode;memcpy(aux.fog_params,s->fog_params,16);
     for(i=0;i<4;i++){aux.texinfo[i][0]=(float)(s->textures[i].width?s->textures[i].width:1);aux.texinfo[i][1]=(float)(s->textures[i].height?s->textures[i].height:1);}
@@ -733,6 +966,7 @@ static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32
     for(i=0;i<4;i++)RELEASE(views[i],ID3D11ShaderResourceView);
     if(g.draws==1)fprintf(stderr,"[HW GPU] first batch submitted, %u vertices %u indices\n",count,ni);return 1;
 failed:
+    check_device_removed("draw setup");
     for(i=0;i<4;i++)RELEASE(views[i],ID3D11ShaderResourceView);
     return 0;
 }
@@ -750,12 +984,12 @@ int nv2a_hw_present_source(const unsigned char *color,uint32_t pitch,uint32_t wi
        g.target.width!=width||g.target.height!=height||g.color_dirty||
        g.completed_draws!=g.draws||!g.color_loaded||!g.color_cpu_valid)return 1;
     for(uint32_t y=0;y<height;y++)
-        if(memcmp(color+(size_t)y*pitch,g.color_cpu_copy+(size_t)y*width*4,width*4))return 1;
+        if(compared(color+(size_t)y*pitch,g.color_cpu_copy+(size_t)y*width*4,width*4,1))return 1;
     *resource=g.color;return 1;
 }
 void nv2a_hw_shutdown(void)
 {
-    unsigned i;if(!g.initialized)return;nv2a_hw_sync();if(g.ctx)ID3D11DeviceContext_ClearState(g.ctx);drop_target();
+    unsigned i;if(!g.initialized)return;nv2a_hw_sync_reason(NV2A_SYNC_SHUTDOWN,1);nv2a_hw_perf_report();if(g.ctx)ID3D11DeviceContext_ClearState(g.ctx);drop_target();
     report_sync_stats();
     for(i=0;i<TARGET_POOL_SIZE;i++) {
         release_storage(&g.target_pool[0][i]);release_storage(&g.target_pool[1][i]);
@@ -774,6 +1008,15 @@ int nv2a_hw_draw(const Nv2aHwState*s,const Nv2aVshOutput*v,uint32_t n,const uint
 int nv2a_hw_draw_raw(const Nv2aHwState*s,const float(*v)[16][4],uint32_t n,const uint32_t*i,uint32_t ni,const Nv2aVshSnapshot*p){(void)s;(void)v;(void)n;(void)i;(void)ni;(void)p;return 0;}
 int nv2a_hw_sync(void){return 1;}
 int nv2a_hw_complete(void){return 1;}
+int nv2a_hw_sync_reason(Nv2aSyncReason reason,int depth){(void)reason;(void)depth;return 1;}
+void nv2a_hw_segment_begin(void){}
+void nv2a_hw_segment_end(void){}
+void nv2a_hw_perf_event(Nv2aPerfEvent event){(void)event;}
+void nv2a_hw_perf_trap_wait(uint64_t ticks){(void)ticks;}
+void nv2a_hw_perf_report(void){}
+void nv2a_hw_guest_write(void){}
+int nv2a_hw_acquire_input(const void *input,size_t bytes){(void)input;(void)bytes;return 1;}
+void nv2a_hw_input_aliases(void *contiguous,void *tiled,size_t bytes){(void)contiguous;(void)tiled;(void)bytes;}
 int nv2a_hw_present_source(const unsigned char *color,uint32_t pitch,uint32_t width,uint32_t height,
                            void **device,void **context,void **resource)
 {

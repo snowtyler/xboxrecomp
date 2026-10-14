@@ -473,6 +473,36 @@ static void note_unhandled(uint32_t method, uint32_t param)
 /* Read attribute `a` of vertex `index` as floats. Only the float and the
  * normalised-byte types appear in practice; anything else returns 0 so a
  * caller sees a degenerate vertex rather than reading past the array. */
+static int release_coalescing(void);
+static int acquire_vertex_inputs(uint32_t count,uint32_t mask)
+{
+    if(!release_coalescing()||s_gpu.inline_active||!count)return 1;
+    uint32_t low=s_gpu.idx[0],high=low;
+    for(uint32_t i=1;i<count;i++){if(s_gpu.idx[i]<low)low=s_gpu.idx[i];if(s_gpu.idx[i]>high)high=s_gpu.idx[i];}
+    for(unsigned a=0;a<16;a++)if((mask&(1u<<a))&&s_gpu.attr[a].size&&s_gpu.attr[a].stride&&s_gpu.attr[a].offset) {
+        const VertexAttr *attr=&s_gpu.attr[a];
+        uint32_t components=attr->size<4?attr->size:4,element_bytes;
+        switch(attr->type) {
+        case 0:case 6:element_bytes=4;break;
+        case 2:element_bytes=components*4;break;
+        case 1:case 5:element_bytes=components*2;break;
+        case 4:element_bytes=components;break;
+        default:continue; /* fetch_attr does not read unsupported formats. */
+        }
+        uint64_t begin=(uint64_t)attr->offset+(uint64_t)low*attr->stride;
+        uint64_t bytes=(uint64_t)(high-low)*attr->stride+element_bytes;
+        if(begin>=0x100000000ULL || bytes>0x100000000ULL-begin) {
+            static unsigned bad_ranges;
+            if(bad_ranges++<8)fprintf(stderr,"[GPU INPUT] invalid vertex range attr=%u begin=%llX bytes=%llu\n",a,
+                (unsigned long long)begin,(unsigned long long)bytes);
+            xbox_Nv2aFenceBatchFail();return 0;
+        }
+        if(!nv2a_hw_acquire_input((const uint8_t*)xbox_GetMemoryOffset()+(size_t)begin,(size_t)bytes)) {
+            xbox_Nv2aFenceBatchFail();return 0;
+        }
+    }
+    return 1;
+}
 static int fetch_attr(const VertexAttr *a, uint32_t index, float out[4])
 {
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
@@ -2190,7 +2220,7 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
 {
     Nv2aHwState state={0};uint32_t i,n=0,bpp=surface_bpp();
     if(!nv2a_hw_enabled()||s_gpu.zpass_enable||s_gpu.depth_clip_min!=0||!bpp)return 0;
-    if(s_hw_zeta!=s_gpu.zeta_offset){if(!nv2a_hw_sync())return 0;s_hw_zeta=s_gpu.zeta_offset;}
+    if(s_hw_zeta!=s_gpu.zeta_offset){if(!nv2a_hw_sync_reason(NV2A_SYNC_DEPTH,1))return 0;s_hw_zeta=s_gpu.zeta_offset;}
     switch(s_gpu.prim){
     case NV_PRIM_TRIANGLES:for(i=0;i+2<count;i+=3){s_hw_indices[n++]=i;s_hw_indices[n++]=i+1;s_hw_indices[n++]=i+2;}break;
     case NV_PRIM_TRIANGLE_STRIP:for(i=0;i+2<count;i++){s_hw_indices[n++]=i;s_hw_indices[n++]=i+1;s_hw_indices[n++]=i+2;}break;
@@ -2222,6 +2252,7 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
          * The backend checks pitch/extent and retains its decoded fallback. */
         out->bgra_pitch=(t->color==0x12&&out->linear&&out->levels==1&&!out->cube)?t->pitch:0;
         out->sample_mip=hw_sample_mip;
+        out->source_pitch=out->linear?t->pitch:0;
         if(t->color==0x0B&&t->palette){out->palette=(const uint8_t*)xbox_GetMemoryOffset()+t->palette;out->palette_bytes=1024;}
         /* Feedback sampling needs the software path's sequential CPU writes. */
         uintptr_t a=(uintptr_t)out->raw,b=(uintptr_t)state.color;
@@ -2232,6 +2263,7 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
         static int gather_all=-1;
         if(gather_all<0)gather_all=getenv("RECOMP_HW_VSH_GATHER_ALL")!=NULL;
         uint32_t input_mask=gather_all?0xFFFFu:nv2a_vsh_input_mask(program);
+        if(!acquire_vertex_inputs(count,input_mask))return 0;
         uint32_t input_count=0;for(uint32_t a=0;a<16;a++)if(input_mask&(1u<<a))++input_count;
         uint32_t unique=0;nv2a_vertex_cache_begin(&s_hw_input_cache);
         for(i=0;i<count;i++) {
@@ -2275,7 +2307,7 @@ static void raster_batch_program(void)
     uint32_t i, n = s_gpu.idx_count;
     static int timing = -1;
     uint64_t started = 0, transformed = 0;
-    if (timing < 0) timing = getenv("RECOMP_GPU_TIMING") != NULL;
+    if (timing < 0) timing = getenv("RECOMP_GPU_TIMING") != NULL || getenv("RECOMP_HW_CPU_TIMING") != NULL;
     if (timing) started = (uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
     static int raw_vertex=-1;if(raw_vertex<0)raw_vertex=getenv("RECOMP_HW_VERTEX")!=NULL;
     if(raw_vertex&&nv2a_hw_enabled()&&nv2a_vsh_cacheable()) {
@@ -2288,6 +2320,7 @@ static void raster_batch_program(void)
     }
     {
         int cacheable = nv2a_vsh_cacheable();
+        if(!acquire_vertex_inputs(n,0xFFFFu))return;
         nv2a_vertex_cache_begin(&s_vertex_cache);
         for (i = 0; i < n; i++) {
             uint32_t previous;
@@ -2365,6 +2398,7 @@ static void raster_batch_program(void)
 
     if(hardware_batch(n,NULL))goto batch_finished;
     if(!nv2a_hw_sync())return;
+    nv2a_hw_guest_write();
     if(s_gpu.depth_mask)zbuf_changed(zbuf_current(1));
 
     switch (s_gpu.prim) {
@@ -2428,6 +2462,7 @@ static void raster_batch(void)
         s_gpu.batches_untransformed++;
         return;
     }
+    nv2a_hw_guest_write();
     if(s_gpu.depth_mask)zbuf_changed(zbuf_current(1));
 
     /* Count why, once per batch: the texture stage cannot change inside one. */
@@ -3018,6 +3053,13 @@ static void tex_stage_method(uint32_t method, uint32_t param)
         record_tex_reg(method, param);
 }
 
+static int release_coalescing(void)
+{
+    static int enabled=-1;
+    if(enabled<0)enabled=getenv("RECOMP_HW_RELEASE_COALESCE")!=NULL&&
+        getenv("RECOMP_HW_RELEASE_BARRIER")==NULL;
+    return enabled;
+}
 void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
 {
     static int inited;
@@ -3081,15 +3123,20 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
     switch (method) {
     case 0x0100: /* NO_OPERATION: nonzero parameter traps a software method. */
         if(param) {
-            if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+            nv2a_hw_perf_event(NV2A_PERF_TRAP);
+            if(!nv2a_hw_sync_reason(NV2A_SYNC_TRAP,0)){xbox_Nv2aFenceBatchFail();return;}
             /* A trap observes completed prefix commands, including their
              * semaphore writes, before the original ISR can recycle data. */
             if(!xbox_Nv2aFenceBatchFlush())return;
+            uint64_t began=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
             if(!xbox_Nv2aSoftwareNotify(subch,param))note_unhandled(method,param);
+            nv2a_hw_perf_trap_wait((uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-began);
+            nv2a_hw_guest_write();
         }
         break;
     case 0x0110: /* WAIT_FOR_IDLE */
-        if(!nv2a_hw_complete())xbox_Nv2aFenceBatchFail();
+        nv2a_hw_perf_event(NV2A_PERF_IDLE);
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_IDLE,0))xbox_Nv2aFenceBatchFail();
         break;
     case 0x01A4: /* NV097_SET_CONTEXT_DMA_SEMAPHORE */
         s_gpu.semaphore_context = param;
@@ -3097,14 +3144,17 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
     case 0x1D6C: /* NV097_SET_SEMAPHORE_OFFSET */
         s_gpu.semaphore_offset = param;
         break;
-    case 0x1D70: /* NV097_BACK_END_WRITE_SEMAPHORE_RELEASE */
-        /* Preserve the original release execution barrier even when the
-         * frontend defers the store. Gameplay comparisons with this wait
-         * deferred stalled in the title's graphics-event path. */
-        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+    case 0x1D70: { /* NV097_BACK_END_WRITE_SEMAPHORE_RELEASE */
+        nv2a_hw_perf_event(NV2A_PERF_RELEASE);
+        /* A batched release queues its store. Batch end and trap flush still
+         * complete the GPU before publishing that store. Standalone releases
+         * retain immediate completion; the override restores every barrier. */
+        if((!release_coalescing()||!xbox_Nv2aFenceBatchActive())&&
+           !nv2a_hw_sync_reason(NV2A_SYNC_RELEASE,0)){xbox_Nv2aFenceBatchFail();return;}
         if (!xbox_Nv2aReleaseSemaphore(s_gpu.semaphore_context, s_gpu.semaphore_offset, param))
             note_unhandled(method, param);
         break;
+    }
     case NV097_SET_SURFACE_CLIP_HORIZONTAL:
         s_gpu.clip_x = param & 0xFFFF;
         s_gpu.clip_w = (param >> 16) & 0xFFFF;
@@ -3166,6 +3216,11 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         s_gpu.zpass_enable = param;
         break;
     case 0x17D0: {                                /* GET_REPORT */
+        /* Publishing a report's done word is another observable progress
+         * boundary. A deferred release must not leave earlier color stale. */
+        if(release_coalescing()&&!nv2a_hw_sync_reason(NV2A_SYNC_REPORT,0)) {
+            xbox_Nv2aFenceBatchFail();return;
+        }
         /* The GPU's answer to a visibility test: 16 bytes at the report
          * DMA offset -- a timestamp, the pixel count, and 0 for "done".
          * Never written, a title polling it (D3D's GetVisibilityTestResult
@@ -3179,6 +3234,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         memcpy(mem + at, &stamp, 8);
         memcpy(mem + at + 8, &s_gpu.zpass_count, 4);
         memset(mem + at + 12, 0, 4);
+        nv2a_hw_guest_write();
         break;
     }
     case NV097_SET_BLEND_COLOR:
@@ -3191,12 +3247,14 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         s_gpu.blend_dfactor = param;
         break;
     case NV097_CLEAR_SURFACE:
-        if(!nv2a_hw_sync())return;
+        nv2a_hw_perf_event(NV2A_PERF_CLEAR);
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_CLEAR,1))return;
         if (s_ftrace == 2)
             fprintf(stderr, "[FTRACE] clear %X surf %08X %ux%u colour %08X%c",
                     param, s_gpu.color_offset, s_gpu.clip_w, s_gpu.clip_h,
                     s_gpu.clear_color, 10);
         clear_surface(param);
+        nv2a_hw_guest_write();
         if (param & 0x01)                         /* Z */
             zbuf_clear();
         break;
@@ -3285,7 +3343,8 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
          * must not depend on the subsequent wait command. Completion makes
          * guest color pixels coherent; private managed depth can stay on the
          * GPU until a CPU raster, clear or target change needs it. */
-        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_FLIP,0)){xbox_Nv2aFenceBatchFail();return;}
+        nv2a_hw_perf_event(NV2A_PERF_FLIP);
         if (getenv("RECOMP_MOVIE_ORDER")) {
             static unsigned order_flips;
             if (order_flips++ < 128)
@@ -3300,6 +3359,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         /* This is a completed swap, which is what a title's own swap
          * counter counts -- see xbox_Nv2aFrameCounterFlip. */
         xbox_Nv2aFrameCounterFlip();
+        nv2a_hw_perf_report();
         /* Hand the window a copy of the frame just finished.
          *
          * The buffer the title has finished is the one the last batch drew
@@ -3386,7 +3446,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
 
 
     case NV097_FLIP_STALL:
-        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+        if(!nv2a_hw_sync_reason(NV2A_SYNC_FLIP,0)){xbox_Nv2aFenceBatchFail();return;}
         s_gpu.flip_read=s_gpu.flip_write;
         return;
 

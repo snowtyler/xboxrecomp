@@ -2,7 +2,8 @@ param(
     [ValidatePattern('^(brute_force_e3_perf[0-9]+|brute_force_e3_prototype)\.exe$')]
     [string]$Executable = 'brute_force_e3_perf132.exe',
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Name = 'test-launcher132-final',
-    [int]$Seconds = 90
+    [int]$Seconds = 90,
+    [switch]$TextureEpoch
 )
 $ErrorActionPreference = 'Stop'
 $binaryTask = Join-Path $PSScriptRoot "build/RelWithDebInfo/$Executable"
@@ -23,8 +24,9 @@ $gameTask = $null
 $windowTask = [IntPtr]::Zero
 $resultTask = $null
 try {
-    $launcherTask = Start-Process -FilePath $shellTask -ArgumentList @('-NoProfile','-File',
-        (Join-Path $PSScriptRoot 'play.ps1'),'-Executable',$Executable) -WindowStyle Hidden -PassThru `
+    $argumentsTask = @('-NoProfile','-File', (Join-Path $PSScriptRoot 'play.ps1'),'-Executable',$Executable)
+    if ($TextureEpoch) { $argumentsTask += '-TextureEpoch' }
+    $launcherTask = Start-Process -FilePath $shellTask -ArgumentList $argumentsTask -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $analysisTask "$Name.stdout.log") `
         -RedirectStandardError (Join-Path $analysisTask "$Name.stderr.log")
     $deadlineTask = (Get-Date).AddSeconds($Seconds)
@@ -65,6 +67,7 @@ try {
     $resultTask = [ordered]@{
         executable = $binaryTask
         sha256 = (Get-FileHash -LiteralPath $binaryTask -Algorithm SHA256).Hash.ToLowerInvariant()
+        texture_epoch = [bool]$TextureEpoch
         launcher_pid = $launcherTask.Id
         game_pid = $gameTask.Id
         window_seen = $true

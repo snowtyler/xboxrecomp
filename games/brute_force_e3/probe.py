@@ -1,10 +1,12 @@
 """Capture a bounded, hidden startup probe; runtime options are inherited."""
 import argparse
+import atexit
 import json
 import os
 from pathlib import Path
 import subprocess
 import time
+import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--seconds", type=int, default=15)
@@ -39,6 +41,32 @@ if args.stop_file and args.stop_file.exists():
 if not args.name.replace("-", "").replace("_", "").isalnum():
     parser.error("name must contain only letters, digits, underscores, or hyphens")
 p = Path(__file__).resolve().parent
+(p / 'analysis').mkdir(exist_ok=True)
+if any((p / "analysis" / (args.name + suffix)).exists()
+       for suffix in (".json", "-process.json", ".stderr.log", ".stdout.log")):
+    parser.error("Probe artifacts already exist; use a fresh name")
+lock_path = p / "analysis/runtime-probe.lock"
+lock_token = str(uuid.uuid4())
+try:
+    with lock_path.open("x", encoding="utf-8") as lock:
+        json.dump({"name": args.name, "executable": args.exe, "owner_pid": os.getpid(),
+                   "token": lock_token}, lock)
+except FileExistsError:
+    parser.error("Another probe owns runtime-probe.lock; inspect it before starting another test")
+proc = None
+metrics_proc = None
+def release_probe_lock():
+    # Unhandled observer errors must not leave an unbounded game behind.
+    for owned in (proc, metrics_proc):
+        if owned is not None and owned.poll() is None:
+            owned.kill()
+            owned.wait()
+    try:
+        if json.loads(lock_path.read_text(encoding="utf-8"))["token"] == lock_token:
+            lock_path.unlink()
+    except FileNotFoundError:
+        pass
+atexit.register(release_probe_lock)
 env = os.environ.copy()
 env.setdefault("BRUTE_FORCE_E3_DIR", "D:/Downloads/Brute Force E3 Prototype")
 env.setdefault("BRUTE_FORCE_E3_SAVE_DIR", str(p / "saves"))
@@ -53,7 +81,6 @@ startup = subprocess.STARTUPINFO()
 startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
 startup.wShowWindow = 0
 start = time.monotonic()
-metrics_proc = None
 with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/{args.name}.stderr.log").open("w") as err:
     proc = subprocess.Popen([str(p / "build/RelWithDebInfo" / args.exe)],
                             cwd=p, env=env, stdout=out, stderr=err,
@@ -64,6 +91,8 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
                    "RECOMP_HW_PRESENT", "RECOMP_HW_COLOR_RELOAD", "RECOMP_HW_TARGET_POOL_DISABLE", "RECOMP_HW_TARGET_POOL",
                    "RECOMP_HW_BULK_READBACK", "RECOMP_HW_READBACK_FENCE", "RECOMP_HW_VSH_GATHER_ALL", "RECOMP_PB_REPORT_MS", "RECOMP_PERF_WINDOWS",
                    "RECOMP_AUDIO_TRACE", "RECOMP_PAD_SCRIPT", "RECOMP_WATCHDOG_SECS"]
+    config_keys += ["RECOMP_HW_COUNTERS", "RECOMP_HW_CPU_TIMING", "RECOMP_HW_RELEASE_COALESCE",
+                    "RECOMP_HW_RELEASE_BARRIER", "RECOMP_HW_TEXTURE_HASH", "RECOMP_HW_TEXTURE_EPOCH"]
     (p / f"analysis/{args.name}-process.json").write_text(json.dumps({"pid": proc.pid,
         "executable": args.exe, "configuration": {key: env.get(key) for key in config_keys},
         "capture_from": args.capture_from, "capture_for": args.capture_for,

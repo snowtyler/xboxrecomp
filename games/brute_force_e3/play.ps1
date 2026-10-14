@@ -2,9 +2,13 @@ param(
     [string]$GameDirectory = 'D:\Downloads\Brute Force E3 Prototype',
     [string]$Executable = 'brute_force_e3_prototype.exe',
     [switch]$SoftwareVertex,
+    [switch]$TextureEpoch,
     [switch]$Audio = $true
 )
 $ErrorActionPreference = 'Stop'
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'analysis/runtime-probe.lock')) {
+    throw 'A performance probe is active; wait for it to finish before launching another game.'
+}
 $binaryTask = Join-Path $PSScriptRoot "build\RelWithDebInfo\$Executable"
 if (-not (Test-Path -LiteralPath $binaryTask -PathType Leaf)) {
     throw "Build executable not found: $binaryTask"
@@ -48,6 +52,12 @@ $settingsTask = @{
     RECOMP_PB_CALL_TRACE = $null
     RECOMP_GPU_TIMING = $null
     RECOMP_HW_GPU_TRACE = $null
+    RECOMP_HW_COUNTERS = $null
+    RECOMP_HW_CPU_TIMING = $null
+    RECOMP_HW_RELEASE_COALESCE = $null
+    RECOMP_HW_RELEASE_BARRIER = $null
+    RECOMP_HW_TEXTURE_HASH = $null
+    RECOMP_HW_TEXTURE_EPOCH = $(if ($TextureEpoch) { '1' } else { $null })
     RECOMP_HW_COLOR_RELOAD = $null
     RECOMP_HW_PRESENT = $null
     RECOMP_HW_TARGET_POOL = $null
@@ -69,7 +79,14 @@ $processTask = $null
 try {
     foreach ($keyTask in $settingsTask.Keys) {
         $previousTask[$keyTask] = [Environment]::GetEnvironmentVariable($keyTask, 'Process')
-        [Environment]::SetEnvironmentVariable($keyTask, $settingsTask[$keyTask], 'Process')
+        # PowerShell's string binding converts $null in SetEnvironmentVariable
+        # to an empty string. Native getenv checks presence, so remove disabled
+        # flags through the environment provider instead.
+        if ($null -eq $settingsTask[$keyTask]) {
+            Remove-Item -LiteralPath "Env:$keyTask" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($keyTask, $settingsTask[$keyTask], 'Process')
+        }
     }
     # The child creates its visible game window; hide its diagnostic console.
     $processTask = Start-Process -FilePath $binaryTask -WorkingDirectory $PSScriptRoot `
@@ -78,7 +95,11 @@ try {
         -RedirectStandardError (Join-Path $logTask "play-$stampTask.stderr.log")
 } finally {
     foreach ($keyTask in $previousTask.Keys) {
-        [Environment]::SetEnvironmentVariable($keyTask, $previousTask[$keyTask], 'Process')
+        if ($null -eq $previousTask[$keyTask]) {
+            Remove-Item -LiteralPath "Env:$keyTask" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($keyTask, $previousTask[$keyTask], 'Process')
+        }
     }
 }
 Write-Host 'Controls: Enter=Start, Z=A/accept, S=Y/skip tutorial menus, arrows=menus.'

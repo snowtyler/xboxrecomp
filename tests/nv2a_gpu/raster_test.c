@@ -20,6 +20,16 @@ static uint32_t bgra_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
 {(void)opaque;assert(face==0&&x<2&&y<2);++bgra_samples;return bgra_rows[y*3+x];}
 static uint32_t bgra_alternate_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
 {return bgra_sample(opaque,face,x,y)^0x00FFFFFF;}
+static uint32_t palette_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
+{(void)face;(void)x;(void)y;return *(uint32_t*)opaque;}
+static uint32_t palette_alternate(void *opaque,uint32_t face,uint32_t x,uint32_t y)
+{return palette_sample(opaque,face,x,y)^0x00FFFFFF;}
+static unsigned context_decodes;
+static uint32_t context_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
+{++context_decodes;return palette_sample(opaque,face,x,y);}
+typedef struct {const uint32_t *pixels;uint32_t pitch_words;} LayoutSample;
+static uint32_t layout_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
+{LayoutSample *layout=opaque;assert(face==0&&x<2&&y<2);return layout->pixels[y*layout->pitch_words+x];}
 int main(void)
 {
     _putenv_s("RECOMP_HW_RASTER","1");
@@ -53,6 +63,29 @@ int main(void)
     assert(pixels[8*32+8]==image[0]);assert(pixels[8*32+24]==image[1]);assert(pixels[24*32+8]==image[2]);assert(pixels[24*32+24]==image[3]);
     image[0]=0xFF102030;
     assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(pixels[8*32+8]==image[0]);
+    /* Segment first-use validation and explicit ISR/host write boundaries.
+     * Two draws before a readback exercise cached validation, then a CPU edit
+     * must affect only commands following its ordering boundary. */
+    Nv2aHwState saved_state=s;
+    s.clip_x=0;s.clip_w=8;
+    nv2a_hw_segment_begin();
+    image[0]=0xFF123456;
+    assert(nv2a_hw_draw(&s,v,4,indices,6));
+    assert(nv2a_hw_draw(&s,v,4,indices,6));
+    image[0]=0xFFABCDEF;nv2a_hw_guest_write();
+    s.clip_x=8;
+    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(pixels[4*32+4]==0xFF123456&&pixels[4*32+12]==0xFFABCDEF);
+    /* Readback invalidates validation within the same segment. */
+    image[0]=0xFF778899;
+    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(pixels[4*32+12]==image[0]);
+    nv2a_hw_segment_end();
+    image[0]=0xFF224466;
+    nv2a_hw_segment_begin();
+    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(pixels[4*32+12]==image[0]);nv2a_hw_segment_end();
+    s=saved_state;
     /* Surface switching downloads prior GPU work before selecting new backing. */
     static uint32_t other[32*32];s.surface=3;s.color=(unsigned char*)other;
     assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(other[8*32+8]==image[0]);
@@ -322,6 +355,72 @@ int main(void)
     assert(nv2a_hw_draw(&packed,v,4,indices,6));assert(nv2a_hw_sync());
     assert(wide[256*8-1]==0xFE55AA99);assert(wide[0]==0xFE554477);
     for(i=0;i<4;i++){v[i].pos[0]=(i&1)?32:0;v[i].pos[1]=(i&2)?32:0;}
+    /* More distinct identities than cache slots and hash buckets exercise
+     * eviction and collisions. Returning to the first backing must reload. */
+    static uint32_t many_textures[1025];
+    Nv2aHwState textured=packed;
+    textured.width=textured.clip_w=textured.height=textured.clip_h=32;
+    textured.pitch=128;textured.color=(unsigned char*)third;
+    textured.color_mask=0x01010101;textured.rc.stage_program=1;
+    textured.rc.final0=8;textured.rc.final1=0x1800;
+    textured.textures[0]=(Nv2aHwTexture){0};
+    Nv2aHwTexture *tex=&textured.textures[0];
+    tex->width=tex->height=tex->levels=1;tex->linear=1;
+    tex->format=0x12;tex->bgra_pitch=tex->raw_bytes=4;
+    nv2a_hw_segment_begin();
+    for(i=0;i<1025;i++) {
+        many_textures[i]=0xFF000000u|i;
+        tex->raw=&many_textures[i];
+        assert(nv2a_hw_draw(&textured,v,4,indices,6));
+    }
+    assert(nv2a_hw_sync());assert(third[16*32+16]==many_textures[1024]);
+    many_textures[0]=0xFF556677;tex->raw=&many_textures[0];
+    assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(third[16*32+16]==many_textures[0]);
+    /* Palette contents and backing identity both participate in freshness. */
+    uint32_t palette_a=0xFF123ABC,palette_b=0xFF987DEF;
+    tex->format=0x0B;tex->bgra_pitch=0;tex->palette=&palette_a;
+    tex->palette_bytes=4;tex->opaque=&palette_a;tex->sample=palette_sample;
+    assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(third[16*32+16]==palette_a);
+    palette_a=0xFFAA2233;nv2a_hw_guest_write();
+    assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(third[16*32+16]==palette_a);
+    tex->palette=tex->opaque=&palette_b;
+    assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(third[16*32+16]==palette_b);
+    if(getenv("RECOMP_HW_TEXTURE_HASH")||getenv("RECOMP_HW_TEXTURE_EPOCH")) {
+        tex->sample=palette_alternate; /* Same bytes, different decode identity. */
+        assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+        assert(third[16*32+16]==(palette_b^0x00FFFFFF));
+    }
+    nv2a_hw_segment_end();
+    /* Identical bytes bound through alternating decoder contexts need separate
+     * reusable entries, rather than destroying the other context every draw. */
+    uint32_t contexts[2]={0xFF334455,0xFF334455};
+    tex->palette=NULL;tex->palette_bytes=0;tex->sample=context_sample;
+    nv2a_hw_segment_begin();
+    for(unsigned pass=0;pass<50;pass++) {
+        tex->opaque=&contexts[pass&1];
+        assert(nv2a_hw_draw(&textured,v,4,indices,6));
+    }
+    assert(context_decodes<=2);assert(nv2a_hw_sync());
+    assert(third[16*32+16]==contexts[0]);nv2a_hw_segment_end();
+    /* Changing decoder pitch can leave the rounded raw byte span unchanged. */
+    uint32_t layout_pixels[8]={0xFFFF0000,0xFF00FF00,0xFF0000FF,0xFFFFFFFF,
+                              0xFF00FFFF,0xFFFF00FF,0xFF000000,0xFFFFFF00};
+    LayoutSample layout={layout_pixels,2};
+    tex->width=tex->height=2;tex->format=0x12;tex->raw=layout_pixels;
+    tex->raw_bytes=sizeof layout_pixels;tex->sample=layout_sample;tex->opaque=&layout;
+    tex->source_pitch=8;tex->filter=(1u<<16)|(1u<<24);
+    for(i=0;i<4;i++){v[i].tex[0][0]=(i&1)?2:0;v[i].tex[0][1]=(i&2)?2:0;v[i].tex[0][3]=1;}
+    assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+    assert(third[24*32+8]==layout_pixels[2]);
+    if(getenv("RECOMP_HW_TEXTURE_HASH")||getenv("RECOMP_HW_TEXTURE_EPOCH")) {
+        layout.pitch_words=4;tex->source_pitch=16;
+        assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
+        assert(third[24*32+8]==layout_pixels[4]);
+    }
     nv2a_hw_shutdown();
     /* Shutdown releases every pooled resource along with the device. A fresh
      * device must initialize from the new backing, with no retained snapshot. */
@@ -331,5 +430,44 @@ int main(void)
     assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_sync());
     assert(third[8*32+8]==0xFEAA8877);
     assert(fabsf(third_depth[8*1024+8]-2)<0.001f);
+    if(getenv("RECOMP_HW_RELEASE_COALESCE")&&!getenv("RECOMP_HW_RELEASE_BARRIER")) {
+        /* GPU-produced vertex rows must become coherent before CPU stream
+         * packing. Uniform 0x3F800000 words decode to float1 in every slot. */
+        static float input_rows[4][16][4];
+        Nv2aHwState input_state={0};
+        input_state.surface=300;input_state.width=input_state.clip_w=64;
+        input_state.height=input_state.clip_h=4;input_state.pitch=256;input_state.bpp=4;
+        input_state.color=(unsigned char*)input_rows;input_state.depth_scale=1;
+        input_state.color_mask=0x01010101;input_state.use_rc=1;
+        input_state.rc.final0=1;input_state.rc.final1=0x1100;input_state.rc.final_c0=0x3F800000;
+        for(i=0;i<4;i++){v[i].pos[0]=(i&1)?64:0;v[i].pos[1]=(i&2)?4:0;v[i].pos[2]=0;}
+        assert(nv2a_hw_draw(&input_state,v,4,indices,6));
+        input_state.color_mask=0;
+        Nv2aVshSnapshot input_program={0};input_program.count=1;
+        input_program.words[0][1]=(1u<<21)|0x1B;input_program.words[0][2]=2u<<26;
+        input_program.words[0][3]=(15u<<12)|(1u<<11)|1u;
+        assert(nv2a_hw_draw_raw(&input_state,input_rows,4,indices,6,&input_program));
+        assert(input_rows[0][0][0]==1.0f);assert(nv2a_hw_sync());
+        /* GPU-produced indices are acquired before index bounds checks. */
+        uint32_t *index_words=(uint32_t*)input_rows;
+        index_words[0]=1;index_words[1]=2;index_words[2]=3;
+        input_state.color_mask=0x01010101;input_state.rc.final_c0=0;
+        assert(nv2a_hw_draw(&input_state,v,4,indices,6));
+        input_state.color_mask=0;
+        assert(nv2a_hw_draw(&input_state,v,4,index_words,3));
+        assert(index_words[0]==0&&index_words[1]==0&&index_words[2]==0);
+        assert(nv2a_hw_sync());
+        /* A direct host caller may also use private managed depth as input. */
+        for(i=0;i<1024*32;i++)depth[i]=10;
+        input_state.width=input_state.height=input_state.clip_w=input_state.clip_h=32;
+        input_state.pitch=128;input_state.color=(unsigned char*)pixels;
+        input_state.depth=depth;input_state.depth_revision=501;input_state.depth_scale=10;
+        input_state.depth_test=input_state.depth_mask=1;input_state.depth_func=0x207;
+        for(i=0;i<4;i++){v[i].pos[0]=(i&1)?32:0;v[i].pos[1]=(i&2)?32:0;v[i].pos[2]=2;}
+        assert(nv2a_hw_draw(&input_state,v,4,indices,6));assert(depth[0]==10);
+        input_state.depth_test=input_state.depth_mask=0;
+        assert(nv2a_hw_draw_raw(&input_state,(const float(*)[16][4])depth,4,indices,6,&input_program));
+        assert(fabsf(depth[0]-2)<0.001f);assert(nv2a_hw_sync());
+    }
     nv2a_hw_shutdown();puts("Hardware raster, coherence, bounded target pool, direct BGRA, mip freshness and presentation source passed");return 0;
 }

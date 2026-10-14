@@ -17,6 +17,9 @@ typedef struct {
     uint32_t bgra_pitch;
     uint32_t (*sample_mip)(void *opaque, uint32_t face, uint32_t level,
                            uint32_t x, uint32_t y);
+    /* Decoder row pitch, including linear formats outside the direct BGRA
+     * path. Zero retains compatibility with callers without a pitched source. */
+    uint32_t source_pitch;
 } Nv2aHwTexture;
 typedef struct {
     uint32_t surface, zeta, width, height, pitch, bpp;
@@ -56,6 +59,29 @@ int nv2a_hw_sync(void);
 /* Complete GPU work and publish color. Managed depth stays on the GPU until
  * a CPU raster/clear or target transition requests full synchronization. */
 int nv2a_hw_complete(void);
+/* Attribution does not change synchronization. Counters are opt-in and are
+ * owned by the same executor thread as the immediate context. */
+typedef enum {
+    NV2A_SYNC_RELEASE, NV2A_SYNC_TRAP, NV2A_SYNC_IDLE, NV2A_SYNC_FLIP,
+    NV2A_SYNC_CLEAR, NV2A_SYNC_TARGET, NV2A_SYNC_DEPTH, NV2A_SYNC_CPU,
+    NV2A_SYNC_SEGMENT, NV2A_SYNC_SHUTDOWN, NV2A_SYNC_REPORT, NV2A_SYNC_INPUT, NV2A_SYNC_REASON_COUNT
+} Nv2aSyncReason;
+typedef enum {
+    NV2A_PERF_RELEASE, NV2A_PERF_TRAP, NV2A_PERF_IDLE, NV2A_PERF_FLIP,
+    NV2A_PERF_CLEAR, NV2A_PERF_ACK_IDLE, NV2A_PERF_EVENT_COUNT
+} Nv2aPerfEvent;
+int nv2a_hw_sync_reason(Nv2aSyncReason reason, int read_managed_depth);
+void nv2a_hw_segment_begin(void);
+void nv2a_hw_segment_end(void);
+void nv2a_hw_perf_event(Nv2aPerfEvent event);
+void nv2a_hw_perf_trap_wait(uint64_t ticks);
+void nv2a_hw_perf_report(void);
+/* Advance freshness after an ISR or a renderer write to guest backing. */
+void nv2a_hw_guest_write(void);
+/* CPU parsing/gathering may consume an earlier GPU-written target. Acquire
+ * overlapping inputs even while semaphore publication remains deferred. */
+int nv2a_hw_acquire_input(const void *input,size_t bytes);
+void nv2a_hw_input_aliases(void *contiguous,void *tiled,size_t tiled_bytes);
 /* Borrowed D3D11 objects for presentation on the renderer's calling thread.
  * A matching, completed 32-bit target is returned only while its CPU backing
  * still matches the synchronized snapshot. Otherwise resource is NULL and

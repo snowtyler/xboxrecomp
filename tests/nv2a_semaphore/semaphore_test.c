@@ -215,7 +215,8 @@ int main(int argc, char **argv)
         G(fence)=30;
         assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
         xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,31);
-        assert(G(fence)==30&&G(surface+16*128+16*4)==0xFFFF0000);
+        int coalesced=getenv("RECOMP_HW_RELEASE_COALESCE")!=NULL&&getenv("RECOMP_HW_RELEASE_BARRIER")==NULL;
+        assert(G(fence)==30&&G(surface+16*128+16*4)==(coalesced?0xFF0000FF:0xFFFF0000));
         assert(nv2a_hw_complete());xbox_Nv2aFenceBatchEnd(1);
         assert(G(fence)==31&&G(surface+16*128+16*4)==0xFFFF0000);
         for(unsigned i=0;i<4;i++){vertices[i].d0[0]=0;vertices[i].d0[1]=1;}
@@ -224,6 +225,51 @@ int main(int argc, char **argv)
         G(slot+512)=0x41D70;G(slot+516)=32;
         nv2a_pb_scan(slot+512,slot+520);
         assert(G(fence)==32&&G(surface+16*128+16*4)==0xFF00FF00);
+        /* More draws after a queued release are coherent at publication. */
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=1;vertices[i].d0[1]=0;}
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,33);
+        assert(G(fence)==32);
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=0;vertices[i].d0[1]=1;}
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        assert(nv2a_hw_complete());xbox_Nv2aFenceBatchEnd(1);
+        assert(G(fence)==33&&G(surface+16*128+16*4)==0xFF00FF00);
+        /* Unbatched release is still an immediate color dependency. */
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=1;vertices[i].d0[1]=0;}
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        nv2a_pb_exec_method(0,0x1D70,34);
+        assert(G(fence)==34&&G(surface+16*128+16*4)==0xFFFF0000);
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=0;vertices[i].d0[1]=1;}
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,35);
+        nv2a_pb_exec_method(0,0x100,1); /* Prefix sync/flush precedes notify dispatch. */
+        assert(G(fence)==35&&G(surface+16*128+16*4)==0xFF00FF00);
+        nv2a_pb_exec_method(0,0x1D70,36);xbox_Nv2aFenceBatchEnd(0);
+        assert(G(fence)==35); /* A failed suffix retains the trap prefix. */
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=1;vertices[i].d0[1]=0;}
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        G(slot+512)=0x41D70;G(slot+516)=37;G(slot+520)=0xFFFFFFFF;
+        nv2a_pb_scan(slot+512,slot+524);assert(G(fence)==35);
+        nv2a_pb_exec_method(0,0x1D70,38);
+        assert(G(fence)==38&&G(surface+16*128+16*4)==0xFFFF0000);
+        uint32_t second_surface=xbox_ContiguousAlloc(4096,4096);assert(second_surface);
+        for(unsigned i=0;i<1024;i++)G(second_surface+i*4)=0xFF0000FF;
+        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
+        xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,39);
+        Nv2aHwState second_state=hs;second_state.surface=second_surface-XBOX_CONTIG_BASE;
+        second_state.color=(unsigned char*)((uintptr_t)second_surface+xbox_GetMemoryOffset());
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=0;vertices[i].d0[1]=1;}
+        assert(nv2a_hw_draw(&second_state,vertices,4,indices,6));
+        assert(G(fence)==38&&G(surface+16*128+16*4)==0xFFFF0000);
+        assert(nv2a_hw_complete());xbox_Nv2aFenceBatchEnd(1);
+        assert(G(fence)==39&&G(second_surface+16*128+16*4)==0xFF00FF00);
+        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=1;vertices[i].d0[1]=0;}
+        assert(nv2a_hw_draw(&second_state,vertices,4,indices,6));
+        xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,40);
+        uint32_t tiled_pixel=XBOX_TILED_BASE+(second_surface-XBOX_CONTIG_BASE)+16*128+16*4;
+        assert(nv2a_hw_acquire_input((const void*)((uintptr_t)tiled_pixel+xbox_GetMemoryOffset()),4));
+        assert(G(tiled_pixel)==0xFFFF0000&&G(fence)==39);
+        assert(nv2a_hw_complete());xbox_Nv2aFenceBatchEnd(1);assert(G(fence)==40);
         nv2a_hw_shutdown();
     }
     xbox_MemoryLayoutShutdown(); free(xbe);

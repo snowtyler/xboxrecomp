@@ -75,7 +75,9 @@ def members(base,index):
 result={'pid':a.pid,'tid':a.tid,'image':str(exe),'symbols':{},'guest':{}}
 t=None
 try:
-    for name in ['g_memory_offset','g_state','g_nv2a_notify_pending','s_irq_line','g_irql_raised_count','_tls_index','g_eax','g_ecx','g_edx','g_esp','g_esi','g_edi']:
+    for name in ['g_memory_offset','g_state','g_nv2a_notify_pending','g_nv2a_memory',
+                 'g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed','g_pending_fences',
+                 's_irq_line','g_irql_raised_count','_tls_index','g_eax','g_ecx','g_edx','g_esp','g_esi','g_edi']:
         try:result['symbols'][name]=sym(name)
         except OSError as e:result['symbols'][name]={'error':str(e)}
     offset=uint(result['symbols']['g_memory_offset']['address'],8)
@@ -89,6 +91,26 @@ try:
     if not t or n.NtQueryInformationThread(t,0,basic,48,None)!=0:raise RuntimeError('Thread info unavailable')
     teb=int.from_bytes(basic.raw[8:16],'little');slots=uint(teb+0x58,8)
     index=uint(result['symbols']['_tls_index']['address']);tls=uint(slots+index*8,8)
+    def variable_address(name):
+        value=result['symbols'][name]
+        return tls+value['address'] if value.get('flags',0)&0x4000 else value['address']
+    gpu={'fence_thread_id':a.tid}
+    try:
+        base=uint(variable_address('g_nv2a_memory'),8)
+        gpu['registers']={name:hex(uint(base+at)) for name,at in {
+            'DMA_PUT':0x800040,'DMA_GET':0x800044,'PMC_INTR':0x100,'PGRAPH_INTR':0x400100,
+            'PGRAPH_NSOURCE':0x400108,'PGRAPH_TRAPPED_ADDR':0x400704,'PGRAPH_TRAPPED_DATA':0x400708}.items()}
+        gpu['notify_pending']=uint(variable_address('g_nv2a_notify_pending'))
+        gpu['fence_batch']={name:uint(variable_address(name)) for name in
+            ['g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed']}
+        count=gpu['fence_batch']['g_pending_fence_count']
+        if count>64:raise RuntimeError('Invalid pending fence count')
+        pending=variable_address('g_pending_fences')
+        gpu['pending_fences']=[{'target':hex(uint(pending+i*8)), 'value':hex(uint(pending+i*8+4))}
+                               for i in range(count)]
+    except Exception as error:
+        gpu['inspection_error']=str(error)
+    result['gpu']=gpu
     regs={}
     for name in ['g_eax','g_ecx','g_edx','g_esp','g_esi','g_edi']:
         s=result['symbols'][name]

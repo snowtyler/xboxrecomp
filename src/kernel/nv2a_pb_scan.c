@@ -25,6 +25,7 @@
 #include <stddef.h>   /* ptrdiff_t */
 #include <stdlib.h>
 #include <string.h>
+#include "nv2a_hw_raster.h"
 
 #ifndef XBOX_CONTIG_BASE
 #define XBOX_CONTIG_BASE 0x80000000u   /* physical P is at this + P */
@@ -47,6 +48,7 @@ static int s_seen_count;
 /* Aligned method/subchannel pairs have a small fixed hardware domain. Keep
  * their first-seen report order while avoiding a linear search per word. */
 static uint16_t s_seen_slot[8][2048];
+static int s_acquire_inputs=-1;
 
 /* Parse health. An inventory is only worth reading if the walk stayed in step
  * with the command stream: a decoder that desynchronises produces plausible
@@ -225,6 +227,7 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
     (void)ignored;
     while(va<end_va&&words<0x100000u) {
         if(!pb_readable(va,4)){pb_capture_first(root_start,root_end,va,0);fprintf(stderr,"[PB ERROR] unreadable command=%08X\n",va);pb_reject(unknown);break;}
+        if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);break;}
         uint32_t from=va,w=0;
         int resumed=s_pending_count&&va==s_pending_va;
         if(s_pending_count&&!resumed){static unsigned missed;if(missed++<12)fprintf(stderr,"[PB RESUME] expected=%08X got=%08X remaining=%u\n",s_pending_va,va,s_pending_count);}
@@ -256,6 +259,7 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
         uint32_t i;
         for(i=0;i<count&&va<end_va;i++) {
             if(!pb_readable(va,4)){pb_reject(unknown);return words;}
+            if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);return words;}
             uint32_t m=noninc?method:method+i*4,parameter=*(const uint32_t*)(mem+va);va+=4;words++;
             note(subch,m);if(s_exec_enabled)nv2a_pb_exec_method(subch,m,parameter);
             if(subch==0&&m==0x100)s_last_nop=parameter;
@@ -265,6 +269,7 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
             if(subch==0&&m==0x100&&s_nop_shift&&((parameter&31)==s_nop_action)) {
                 uint32_t record=XBOX_CONTIG_BASE|(parameter>>s_nop_shift);
                 if(record!=va+4||!pb_readable(record,s_nop_next+4)){fprintf(stderr,"[PB ERROR] bad NOP record marker=%08X pc=%08X\n",parameter,va);pb_reject(unknown);return words;}
+                if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+record,s_nop_next+4)){pb_reject(unknown);return words;}
                 uint32_t next=*(const uint32_t*)(mem+record+s_nop_next);
                 if((next&3)||next<record+s_nop_next+4||next>end_va){fprintf(stderr,"[PB ERROR] bad NOP continuation=%08X record=%08X\n",next,record);pb_reject(unknown);return words;}
                 va=next;
@@ -300,6 +305,7 @@ void nv2a_pb_scan(uint32_t start_va, uint32_t end_va)
 
     if (s_exec_enabled < 0)
         s_exec_enabled = getenv("RECOMP_PB_EXEC") != NULL;
+    if(s_acquire_inputs<0)s_acquire_inputs=getenv("RECOMP_HW_RELEASE_COALESCE")!=NULL&&getenv("RECOMP_HW_RELEASE_BARRIER")==NULL;
     static int scan = -1;
     if (scan < 0)
         scan = getenv("RECOMP_PB_SCAN") != NULL;
@@ -310,14 +316,15 @@ void nv2a_pb_scan(uint32_t start_va, uint32_t end_va)
 
     /* Backend completion cannot let the CPU reuse command storage while this
      * synchronous frontend is still fetching the submitted stream. */
-    if(s_exec_enabled)xbox_Nv2aFenceBatchBegin();
+    if(s_exec_enabled){nv2a_hw_segment_begin();xbox_Nv2aFenceBatchBegin();}
     words = pb_walk(start_va, end_va, 0, &jumps, &unknown);
     /* The frontend has consumed this segment. GPU completion is required
      * before publishing a semaphore, rather than at every ring submission.
      * CPU raster/clear, target changes and presentation synchronize their
      * own backing before accessing it. */
     if(s_exec_enabled)xbox_Nv2aFenceBatchEnd(unknown==0 &&
-        (!xbox_Nv2aFenceBatchHasRelease() || nv2a_hw_complete()));
+        (!xbox_Nv2aFenceBatchHasRelease() || nv2a_hw_sync_reason(NV2A_SYNC_SEGMENT,0)));
+    if(s_exec_enabled)nv2a_hw_segment_end();
 
     s_tot_words += words;
     s_tot_unknown += unknown;

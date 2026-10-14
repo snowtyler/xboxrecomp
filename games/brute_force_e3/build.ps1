@@ -7,6 +7,19 @@ $msbuild = Join-Path $installation 'MSBuild\Current\Bin\MSBuild.exe'
 $cmake = Join-Path $installation 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 if (-not (Test-Path -LiteralPath $cmake)) { $cmake = (Get-Command cmake -ErrorAction Stop).Source }
 $project = $PSScriptRoot
+if ($OutputName -notmatch '^[A-Za-z0-9_-]+$') { throw 'Use a simple executable basename.' }
+$probeLockTask = Join-Path $project 'analysis/runtime-probe.lock'
+if (Test-Path -LiteralPath $probeLockTask) {
+    $probeOwnerTask = Get-Content -LiteralPath $probeLockTask -Raw | ConvertFrom-Json
+    if ($probeOwnerTask.executable -eq "$OutputName.exe") {
+        throw "Cannot rebuild $OutputName while probe $($probeOwnerTask.name) owns it."
+    }
+}
+$activeTask = @(Get-Process -Name $OutputName -ErrorAction SilentlyContinue)
+if ($activeTask.Count) { throw "Cannot rebuild $OutputName while its process is running." }
+if ($OutputName -in @('brute_force_e3_prototype', 'brute_force_e3_perf132')) {
+    throw 'Verified and retained candidate basenames are protected; select a new OutputName.'
+}
 $build = Join-Path $project 'build'
 $abiOption = if ($AbiCheck) { 'ON' } else { 'OFF' }
 $optimizeOption = if ($Optimize) { 'ON' } else { 'OFF' }

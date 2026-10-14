@@ -12,7 +12,13 @@ param(
     [switch]$ReadbackFence,
     [switch]$GatherAll,
     [switch]$NormalGraphics,
-    [switch]$ProductionBenchmark
+    [switch]$ProductionBenchmark,
+    [switch]$Counters,
+    [switch]$CpuTiming,
+    [switch]$ReleaseCoalesce,
+    [switch]$ReleaseBarrier,
+    [switch]$TextureHash,
+    [switch]$TextureEpoch
 )
 $ErrorActionPreference = 'Stop'
 $env:RECOMP_HW_RASTER = '1'
@@ -23,6 +29,12 @@ $env:RECOMP_KEYBOARD = '1'
 $env:RECOMP_QUIET = '1'
 $env:RECOMP_GPU_TIMING = if ($NormalGraphics -or $ProductionBenchmark) { $null } else { '1' }
 $env:RECOMP_HW_GPU_TRACE = if ($NormalGraphics -or $ProductionBenchmark) { $null } else { '1' }
+$env:RECOMP_HW_COUNTERS = if ($Counters) { '1' } else { $null }
+$env:RECOMP_HW_CPU_TIMING = if ($CpuTiming) { '1' } else { $null }
+$env:RECOMP_HW_RELEASE_COALESCE = if ($ReleaseCoalesce) { '1' } else { $null }
+$env:RECOMP_HW_RELEASE_BARRIER = if ($ReleaseBarrier) { '1' } else { $null }
+$env:RECOMP_HW_TEXTURE_HASH = if ($TextureHash) { '1' } else { $null }
+$env:RECOMP_HW_TEXTURE_EPOCH = if ($TextureEpoch) { '1' } else { $null }
 $env:RECOMP_AUDIO_TRACE = '1'
 $env:RECOMP_HW_PRESENT = if ($GpuPresent) { '1' } else { $null }
 $env:RECOMP_AUDIO_MUTE = $null

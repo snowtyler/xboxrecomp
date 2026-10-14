@@ -43,6 +43,9 @@ SYNC_INTERVAL_RE = re.compile(
 )
 INPUT_ERROR_RE = re.compile(r'PAD: unknown button "([^"]+)"')
 PHASE_NAMES = ("shader", "target", "texture", "stream", "uniforms", "bind/draw")
+COUNTER_KEYS = ("draws", "segments", "color", "depth", "fences", "trap_ms",
+                "texture_compare_bytes", "snapshot_compare_bytes", "vertex_upload_bytes",
+                "releases", "traps", "wait_for_idle", "flips", "clears", "ack_idle")
 
 
 def utc_text(epoch):
@@ -83,6 +86,14 @@ def validate_script(log_path, note=None):
 
 
 def parse_line(line):
+    if line.startswith("[HW COUNTERS] "):
+        try:
+            data = json.loads(line[len("[HW COUNTERS] "):])
+            if data.get("version") == 1:
+                return {"type": "hw_counters", "counters": data}
+        except (ValueError, AttributeError):
+            pass  # Truncated or future diagnostic reports are not measurements.
+        return None
     match = GPU_RE.match(line)
     if match:
         return {"type": "gpu", "reported_fps": float(match[1]), "flips": int(match[2])}
@@ -131,6 +142,67 @@ def full_interval(start, end, window, exclusions):
             and not any(overlap(start, end, exclusion) for exclusion in exclusions))
 
 
+def counter_delta(before, after):
+    """Subtract cumulative counters only within one uninterrupted executor run."""
+    if (before["thread_id"] != after["thread_id"] or after["report"] != before["report"] + 1
+            or after["qpc_ms"] <= before["qpc_ms"]):
+        return None
+    delta = {key: after[key] - before[key] for key in COUNTER_KEYS}
+    delta["qpc_ms"] = after["qpc_ms"] - before["qpc_ms"]
+    delta["executor_cpu_ms"] = (after["executor_cpu_ms"] - before["executor_cpu_ms"]
+                                if after["executor_cpu_ms"] is not None
+                                and before["executor_cpu_ms"] is not None else None)
+    delta["release_histogram"] = [b-a for a, b in zip(before["release_histogram"], after["release_histogram"])]
+    delta["sync"] = {}
+    for cause, current in after["sync"].items():
+        previous = before["sync"][cause]
+        delta["sync"][cause] = {key: current[key] - previous[key] for key in ("calls", "failed", "ms")}
+        delta["sync"][cause]["outcomes"] = [b-a for a, b in zip(previous["outcomes"], current["outcomes"])]
+    old_targets = {(item["width"], item["height"], item["bpp"]): item["count"] for item in before["targets"]}
+    delta["targets"] = [{**item, "count": item["count"] - old_targets.get((item["width"], item["height"], item["bpp"]), 0)}
+                        for item in after["targets"]]
+    delta["target_overflow"] = after["target_overflow"] - before["target_overflow"]
+    def nonnegative(value):
+        if isinstance(value, dict):
+            return all(nonnegative(item) for item in value.values())
+        if isinstance(value, list):
+            return all(nonnegative(item) for item in value)
+        return value is None or value >= 0
+    return delta if nonnegative(delta) else None
+
+
+def summarize_counters(intervals):
+    if not intervals:
+        return None
+    values = [item["delta"] for item in intervals]
+    totals = {key: sum(item[key] for item in values) for key in COUNTER_KEYS}
+    totals["qpc_ms"] = sum(item["qpc_ms"] for item in values)
+    totals["executor_cpu_ms"] = (sum(item["executor_cpu_ms"] for item in values)
+                                 if all(item["executor_cpu_ms"] is not None for item in values) else None)
+    totals["release_histogram"] = [sum(item["release_histogram"][i] for item in values) for i in range(9)]
+    totals["sync"] = {}
+    for cause in values[0]["sync"]:
+        totals["sync"][cause] = {key: sum(item["sync"][cause][key] for item in values)
+                                for key in ("calls", "failed", "ms")}
+        totals["sync"][cause]["outcomes"] = [sum(item["sync"][cause]["outcomes"][i] for item in values) for i in range(8)]
+    targets = {}
+    for item in values:
+        for target in item["targets"]:
+            key = (target["width"], target["height"], target["bpp"])
+            targets[key] = targets.get(key, 0) + target["count"]
+    totals["targets"] = [{"width": key[0], "height": key[1], "bpp": key[2], "count": count}
+                         for key, count in sorted(targets.items()) if count]
+    totals["target_overflow"] = sum(item["target_overflow"] for item in values)
+    flips = totals["flips"]
+    return {"complete_report_intervals": len(intervals), "totals": totals,
+            "per_frame": {key: value / flips if flips and value is not None else None
+                          for key, value in totals.items() if key in COUNTER_KEYS + ("executor_cpu_ms", "qpc_ms")},
+            "sync_per_frame": {cause: {"calls": item["calls"] / flips if flips else None,
+                                       "color_readbacks": sum(count for mask, count in enumerate(item["outcomes"]) if mask & 1) / flips if flips else None,
+                                       "ms": item["ms"] / flips if flips else None}
+                               for cause, item in totals["sync"].items()}}
+
+
 def summarize_events(metadata, events):
     """Use exact flip deltas for complete observed reporting intervals."""
     exclusions = metadata["exclusions"]
@@ -143,8 +215,17 @@ def summarize_events(metadata, events):
     syncs = []
     sync_intervals = []
     prior_sync_interval = None
+    counter_intervals = []
+    prior_counter = None
     for event in events:
         kind = event["type"]
+        if kind == "hw_counters":
+            if prior_counter:
+                delta = counter_delta(prior_counter["counters"], event["counters"])
+                if delta is not None:
+                    counter_intervals.append({"start": prior_counter["elapsed_seconds"],
+                                              "end": event["elapsed_seconds"], "delta": delta})
+            prior_counter = event
         if kind == "gpu":
             current_interval = None
             if prior_gpu and event["flips"] >= prior_gpu["flips"]:
@@ -236,6 +317,8 @@ def summarize_events(metadata, events):
         sync_summary["mean_ms_per_sync"] = round(sync_summary["interval_sync_ms"] /
             sync_summary["interval_syncs"], 6) if sync_summary["interval_syncs"] else None
         result["hw_sync_intervals"] = sync_summary
+        result["hw_counters"] = summarize_counters([item for item in counter_intervals
+            if full_interval(item["start"], item["end"], window, exclusions)])
         windows.append(result)
     return {"schema_version": 1, "metadata": metadata, "windows": windows,
             "method": "Exact flip deltas / host seconds, using only full report intervals; "

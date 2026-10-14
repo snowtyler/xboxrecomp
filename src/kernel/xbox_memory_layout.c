@@ -1096,6 +1096,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
 {
     volatile uint32_t *regs = (volatile uint32_t *)param;
     while (!InterlockedCompareExchange(&g_nv2a_ack_stop, 0, 0)) {
+        int submitted=0;
         for (size_t i = 0; i < sizeof(NV2A_ACK) / sizeof(NV2A_ACK[0]); i++) {
             if(g_pfb_page && NV2A_ACK[i].offset==0x100410)continue;
             if(g_irq_veh && (NV2A_ACK[i].offset==0x100 || NV2A_ACK[i].offset==0x400100 || NV2A_ACK[i].offset==0x600100))continue;
@@ -1151,6 +1152,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
             static uint32_t last_put;
             DWORD now_ms = GetTickCount();
             uint32_t put = *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_PUT);
+            submitted=put!=last_put;
             if (put != last_put || (now_ms - last_put_ms) > 2000) {
                 /* Survey the segment the title just submitted, once. */
                 {
@@ -1296,6 +1298,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
         *(volatile uint32_t *)((uintptr_t)(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT)
                                + g_memory_offset) = GetTickCount();
 
+        if(!submitted)nv2a_hw_perf_event(NV2A_PERF_ACK_IDLE);
         Sleep(0);  /* yield; the waiter is spinning on another core */
     }
     return 0;
@@ -2917,6 +2920,9 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         }
     }
 
+    size_t input_tiled_bytes=xbox_TiledApertureSize();
+    if(input_tiled_bytes>XBOX_CONTIG_SIZE)input_tiled_bytes=XBOX_CONTIG_SIZE;
+    nv2a_hw_input_aliases(g_contig_memory,g_tiled_view,input_tiled_bytes);
     xbox_WatchInit();
     fprintf(stderr, "xbox_MemoryLayoutInit: complete\n");
     return TRUE;
@@ -2969,6 +2975,7 @@ void xbox_MemoryLayoutShutdown(void)
     nv2a_gpu_present_shutdown();
     xbox_FramebufferWindowGpuRequest(0);
     nv2a_hw_shutdown();
+    nv2a_hw_input_aliases(NULL,NULL,0);
     if (g_kernel_memory) {
         VirtualFree(g_kernel_memory, 0, MEM_RELEASE);
         g_kernel_memory = NULL;
