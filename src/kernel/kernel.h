@@ -1095,6 +1095,8 @@ void xbox_log(int level, const char* subsystem, const char* fmt, ...);
 #define XBOX_LOG_THUNK   "THUNK"
 #define XBOX_LOG_PATH    "PATH"
 
+int xbox_Nv2aSoftwareNotify(uint32_t subchannel, uint32_t parameter);
+
 #ifdef __cplusplus
 }
 #endif

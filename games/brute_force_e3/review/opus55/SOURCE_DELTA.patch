@@ -1,0 +1,1002 @@
+# Limited initial-snapshot comparison
+Only the10 archived files are compared. This is not the full Git diff,
+nor proof that the old executable corresponds exactly to this source.
+
+--- before/src/kernel/nv2a_hw_raster.c
++++ current/src/kernel/nv2a_hw_raster.c
+@@ -13 +13,8 @@
+-enum { CACHE_SIZE=128, TEXTURE_CACHE_SIZE=512 };
++enum { CACHE_SIZE=128, TEXTURE_CACHE_SIZE=512, TARGET_POOL_SIZE=8 };
++typedef struct {
++    ID3D11Texture2D *texture,*readback,*upload;
++    ID3D11RenderTargetView *rtv;
++    ID3D11DepthStencilView *dsv;
++    uint32_t width,height,bpp;
++    uint64_t last_used;
++} TargetStorage;
+@@ -27,0 +35,4 @@
++typedef struct {
++    uint64_t syncs, ticks, readbacks[2], map_ticks[2], copy_ticks[2];
++    uint64_t fences, fence_ticks, allocations[2], reuses[2];
++} SyncStats;
+@@ -44 +55 @@
+-    int color_cpu_check;
++    int color_cpu_check, color_cpu_valid;
+@@ -45,0 +57,4 @@
++    int pool_targets;
++    int bulk_readback,readback_fence;
++    TargetStorage target_pool[2][TARGET_POOL_SIZE];
++    uint64_t target_pool_clock;
+@@ -56 +71 @@
+-    uint64_t draws,syncs,uploads;
++    uint64_t draws,syncs,uploads,direct_uploads;
+@@ -59,0 +75 @@
++    SyncStats sync_interval;
+@@ -102,0 +119,3 @@
++    g.pool_targets=getenv("RECOMP_HW_TARGET_POOL")!=NULL&&getenv("RECOMP_HW_TARGET_POOL_DISABLE")==NULL;
++    g.bulk_readback=getenv("RECOMP_HW_BULK_READBACK")!=NULL;
++    g.readback_fence=getenv("RECOMP_HW_READBACK_FENCE")!=NULL;
+@@ -124 +143,2 @@
+-    free(g.color_cpu_copy);g.color_cpu_copy=NULL;g.color_cpu_bytes=0;g.color_cpu_check=0;
++    free(g.color_cpu_copy);g.color_cpu_copy=NULL;g.color_cpu_bytes=0;
++    g.color_cpu_check=g.color_cpu_valid=0;
+@@ -133,2 +153,76 @@
+-static int map_readback(ID3D11Texture2D *resource,D3D11_MAPPED_SUBRESOURCE *map)
+-{
++static void release_storage(TargetStorage *storage)
++{
++    RELEASE(storage->rtv,ID3D11RenderTargetView);
++    RELEASE(storage->dsv,ID3D11DepthStencilView);
++    RELEASE(storage->texture,ID3D11Texture2D);
++    RELEASE(storage->readback,ID3D11Texture2D);
++    RELEASE(storage->upload,ID3D11Texture2D);
++    memset(storage,0,sizeof *storage);
++}
++static TargetStorage *pool_retire_slot(unsigned plane,uint32_t width,uint32_t height)
++{
++    /* Eight entries per plane, each at most 4 MiB of texture storage: the
++     * retained allocation budget is bounded by 64 MiB in total. Oversized
++     * targets and incomplete allocation failures use ordinary destruction. */
++    uint64_t bytes=(uint64_t)width*height*4*(plane?3:2);
++    if(!g.pool_targets||!width||!height||bytes>4*1024*1024)return NULL;
++    TargetStorage *oldest=&g.target_pool[plane][0];
++    for(unsigned i=0;i<TARGET_POOL_SIZE;i++) {
++        TargetStorage *entry=&g.target_pool[plane][i];
++        if(!entry->texture){oldest=entry;break;}
++        if(entry->last_used<oldest->last_used)oldest=entry;
++    }
++    release_storage(oldest);
++    oldest->width=width;oldest->height=height;
++    oldest->last_used=++g.target_pool_clock;
++    return oldest;
++}
++static void retire_color(void)
++{
++    TargetStorage *entry=NULL;
++    if(g.color&&g.color_read&&g.rtv)
++        entry=pool_retire_slot(0,g.target.width,g.target.height);
++    if(entry) {
++        ID3D11DeviceContext_OMSetRenderTargets(g.ctx,0,NULL,NULL);
++        entry->texture=g.color;entry->readback=g.color_read;entry->rtv=g.rtv;
++        entry->bpp=g.target.bpp;
++        g.color=g.color_read=NULL;g.rtv=NULL;
++    }
++    drop_color();
++}
++static void retire_depth(void)
++{
++    TargetStorage *entry=NULL;
++    if(g.depth&&g.depth_read&&g.depth_upload&&g.dsv)
++        entry=pool_retire_slot(1,g.depth_target.width,g.depth_target.height);
++    if(entry) {
++        ID3D11DeviceContext_OMSetRenderTargets(g.ctx,0,NULL,NULL);
++        entry->texture=g.depth;entry->readback=g.depth_read;
++        entry->upload=g.depth_upload;entry->dsv=g.dsv;
++        g.depth=g.depth_read=g.depth_upload=NULL;g.dsv=NULL;
++    }
++    drop_depth();
++}
++static void acquire_storage(unsigned plane,const Nv2aHwState *state)
++{
++    if(!g.pool_targets)return;
++    for(unsigned i=0;i<TARGET_POOL_SIZE;i++) {
++        TargetStorage *entry=&g.target_pool[plane][i];
++        if(!entry->texture||entry->width!=state->width||entry->height!=state->height||
++           (!plane&&entry->bpp!=state->bpp))continue;
++        if(plane) {
++            g.depth=entry->texture;g.depth_read=entry->readback;
++            g.depth_upload=entry->upload;g.dsv=entry->dsv;
++        } else {
++            g.color=entry->texture;g.color_read=entry->readback;g.rtv=entry->rtv;
++        }
++        /* No guest backing, revision, or snapshot is retained in the pool.
++         * target() must perform the new target's upload before using storage. */
++        memset(entry,0,sizeof *entry);
++        ++g.sync_interval.reuses[plane];
++        return;
++    }
++}
++static int map_readback(ID3D11Texture2D *resource,D3D11_MAPPED_SUBRESOURCE *map,unsigned plane)
++{
++    LARGE_INTEGER began,ended;QueryPerformanceCounter(&began);
+@@ -144,0 +239,2 @@
++    QueryPerformanceCounter(&ended);++g.sync_interval.readbacks[plane];
++    g.sync_interval.map_ticks[plane]+=ended.QuadPart-began.QuadPart;
+@@ -146,0 +243,17 @@
++}
++static void report_sync_stats(void)
++{
++    SyncStats *s=&g.sync_interval;
++    if(!s->syncs)return;
++    LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);
++    double ms=1000.0/freq.QuadPart;
++    fprintf(stderr,"[HW SYNC] syncs=%llu interval=%llu interval_ms=%.3f ms/sync=%.3f draws=%llu "
++        "color=%llu wait_ms=%.3f copy_ms=%.3f depth=%llu wait_ms=%.3f copy_ms=%.3f "
++        "fence=%llu wait_ms=%.3f color_alloc=%llu color_reuse=%llu depth_alloc=%llu depth_reuse=%llu\n",
++        (unsigned long long)g.syncs,(unsigned long long)s->syncs,s->ticks*ms,s->ticks*ms/s->syncs,
++        (unsigned long long)g.draws,(unsigned long long)s->readbacks[0],
++        s->map_ticks[0]*ms,s->copy_ticks[0]*ms,(unsigned long long)s->readbacks[1],
++        s->map_ticks[1]*ms,s->copy_ticks[1]*ms,(unsigned long long)s->fences,s->fence_ticks*ms,
++        (unsigned long long)s->allocations[0],(unsigned long long)s->reuses[0],
++        (unsigned long long)s->allocations[1],(unsigned long long)s->reuses[1]);
++    memset(s,0,sizeof *s);
+@@ -176,0 +290,31 @@
++static int wait_completion(void)
++{
++    HRESULT hr;LARGE_INTEGER began,ended;
++    if(!g.completion) {
++        D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};
++        hr=ID3D11Device_CreateQuery(g.device,&desc,&g.completion);
++        if(FAILED(hr)) {
++            fprintf(stderr,"[HW FENCE] query failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
++            return 0;
++        }
++    }
++    QueryPerformanceCounter(&began);
++    ID3D11DeviceContext_End(g.ctx,(ID3D11Asynchronous*)g.completion);
++    hr=ID3D11DeviceContext_GetData(g.ctx,(ID3D11Asynchronous*)g.completion,NULL,0,D3D11_ASYNC_GETDATA_DONOTFLUSH);
++    if(hr==S_FALSE) {
++        /* Submit once. Readiness is established by the real event result,
++         * never by the Flush call or by an elapsed-time threshold. */
++        ID3D11DeviceContext_Flush(g.ctx);
++        do {
++            SwitchToThread();
++            hr=ID3D11DeviceContext_GetData(g.ctx,(ID3D11Asynchronous*)g.completion,NULL,0,D3D11_ASYNC_GETDATA_DONOTFLUSH);
++        }while(hr==S_FALSE);
++    }
++    QueryPerformanceCounter(&ended);++g.sync_interval.fences;
++    g.sync_interval.fence_ticks+=ended.QuadPart-began.QuadPart;
++    if(hr!=S_OK) {
++        fprintf(stderr,"[HW FENCE] completion failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
++        return 0;
++    }
++    return 1;
++}
+@@ -180 +324,5 @@
+-    if(!g.dirty) {if(g.color_cpu_copy)g.color_cpu_check=1;return 1;}
++    if(!g.dirty) {
++        if(g.color_cpu_valid)g.color_cpu_check=1;
++        else g.color_loaded=0; /* CPU access after a failed setup has no snapshot. */
++        return 1;
++    }
+@@ -183 +331,2 @@
+-    LARGE_INTEGER began,ended,freq;QueryPerformanceCounter(&began);
++    int download_depth=read_depth&&g.depth_dirty&&g.depth&&g.depth_target.depth;
++    LARGE_INTEGER began,ended,copied;QueryPerformanceCounter(&began);
+@@ -190,0 +340 @@
++        g.color_cpu_valid=0;
+@@ -193,2 +343,20 @@
+-    if(!map_readback(g.color_read,&map))return 0;
+-    for(y=0;y<g.target.height;y++) {
++    }
++    /* Submit both requested copies before either map waits. The maps still
++     * establish real availability before publishing their CPU backing. */
++    if(download_depth)
++        ID3D11DeviceContext_CopyResource(g.ctx,(ID3D11Resource*)g.depth_read,(ID3D11Resource*)g.depth);
++    /* Optional preflight: let an event establish availability after all
++     * requested copies before Map enters the driver. This still blocks the
++     * caller until actual completion and still publishes every CPU byte. */
++    if(g.readback_fence&&(g.color_dirty||download_depth)&&!wait_completion())return 0;
++    if(g.color_dirty) {
++    if(!map_readback(g.color_read,&map,0))return 0;
++    QueryPerformanceCounter(&copied);
++    if(g.bulk_readback && g.target.bpp==4 && g.target.pitch==g.target.width*4 && map.RowPitch==g.target.pitch) {
++        /* Full-width BGRA rows have identical layouts. One contiguous copy
++         * avoids hundreds of small memcpy calls without changing any bytes
++         * or omitting the exact snapshot used to detect CPU edits. */
++        size_t bytes=(size_t)g.target.pitch*g.target.height;
++        memcpy(g.target.color,map.pData,bytes);
++        if(g.color_cpu_copy)memcpy(g.color_cpu_copy,map.pData,bytes);
++    } else for(y=0;y<g.target.height;y++) {
+@@ -204,4 +372,6 @@
+-    }
+-    if(read_depth && g.depth_dirty && g.depth && g.depth_target.depth) {
+-        ID3D11DeviceContext_CopyResource(g.ctx,(ID3D11Resource*)g.depth_read,(ID3D11Resource*)g.depth);
+-        if(!map_readback(g.depth_read,&map))return 0;
++    QueryPerformanceCounter(&ended);g.sync_interval.copy_ticks[0]+=ended.QuadPart-copied.QuadPart;
++    g.color_cpu_valid=g.target.bpp==4&&g.color_cpu_copy!=NULL;
++    }
++    if(download_depth) {
++        if(!map_readback(g.depth_read,&map,1))return 0;
++        QueryPerformanceCounter(&copied);
+@@ -210,0 +381 @@
++        QueryPerformanceCounter(&ended);g.sync_interval.copy_ticks[1]+=ended.QuadPart-copied.QuadPart;
+@@ -215,8 +386 @@
+-        HRESULT hr;
+-        if(!g.completion) {
+-            D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};
+-            if(FAILED(ID3D11Device_CreateQuery(g.device,&desc,&g.completion)))return 0;
+-        }
+-        ID3D11DeviceContext_End(g.ctx,(ID3D11Asynchronous*)g.completion);
+-        do {hr=ID3D11DeviceContext_GetData(g.ctx,(ID3D11Asynchronous*)g.completion,NULL,0,0);if(hr==S_FALSE)SwitchToThread();}while(hr==S_FALSE);
+-        if(FAILED(hr))return 0;
++        if(!wait_completion())return 0;
+@@ -225 +389 @@
+-    g.color_loaded=g.color_cpu_copy!=NULL;g.color_cpu_check=g.color_loaded;
++    g.color_loaded=g.color_cpu_valid;g.color_cpu_check=g.color_loaded;
+@@ -229 +393,2 @@
+-    if(g.syncs%500==0){QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW SYNC] %llu syncs, %.2f ms/sync, draws=%llu\n",(unsigned long long)g.syncs,g.sync_ticks*1000.0/freq.QuadPart/g.syncs,(unsigned long long)g.draws);}
++    ++g.sync_interval.syncs;g.sync_interval.ticks+=ended.QuadPart-began.QuadPart;
++    if(g.syncs%500==0)report_sync_stats();
+@@ -238,2 +403,9 @@
+-    if(g.target.surface!=s->surface||g.target.width!=s->width||g.target.height!=s->height||g.target.bpp!=s->bpp||g.target.color!=s->color) {
+-        if(!nv2a_hw_sync())return 0;drop_color();
++    if(g.target.surface!=s->surface||g.target.width!=s->width||g.target.height!=s->height||g.target.bpp!=s->bpp||g.target.color!=s->color||g.target.pitch!=s->pitch) {
++        if(!nv2a_hw_sync())return 0;
++        if(g.color&&g.target.width==s->width&&g.target.height==s->height&&g.target.bpp==s->bpp) {
++            /* The old guest backing is coherent before its native allocation
++             * is reused. No bytes or CPU snapshot belong to the new target
++             * until its own upload/readback has populated them. */
++            g.color_loaded=g.color_cpu_check=g.color_cpu_valid=0;
++            ++g.sync_interval.reuses[0];
++        } else retire_color();
+@@ -242,2 +414,14 @@
+-        if(!nv2a_hw_sync())return 0;drop_depth();
+-    }
++        if(!nv2a_hw_sync())return 0;
++        if(g.depth&&g.depth_target.width==s->width&&g.depth_target.height==s->height) {
++            g.depth_loaded=0;
++            ++g.sync_interval.reuses[1];
++        } else retire_depth();
++    }
++    if(depth_active&&s->depth_revision!=g.depth_target.depth_revision) {
++        /* Resolve CPU depth changes before uploading color. A no-draw sync
++         * can conservatively invalidate an unsnapshotted color upload, so it
++         * must not run between that upload and its first submitted draw. */
++        if(!nv2a_hw_sync())return 0;
++        g.depth_loaded=0;
++    }
++    if(!g.color)acquire_storage(0,s);
+@@ -251 +435,5 @@
+-        if(FAILED(hr))return 0;
++        if(FAILED(hr)) {
++            fprintf(stderr,"[HW TARGET] color allocation failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
++            return 0;
++        }
++        ++g.sync_interval.allocations[0];
+@@ -272 +460,8 @@
+-    }
++        /* A prior readback snapshot cannot describe this new GPU upload.
++         * Keep the upload loaded for subsequent draws, but require a new
++         * readback before it can validate CPU changes or presentation. */
++        g.color_cpu_valid=g.color_cpu_check=0;
++    }
++    /* Even if later depth setup fails, this allocation now belongs to the
++     * new color backing. Never let a retry identify it as the old surface. */
++    g.target=*s;
+@@ -274,4 +469 @@
+-        if(s->depth_revision!=g.depth_target.depth_revision) {
+-            if(!nv2a_hw_sync())return 0;
+-            g.depth_loaded=0;
+-        }
++        if(!g.depth)acquire_storage(1,s);
+@@ -287 +479,5 @@
+-            if(FAILED(hr))return 0;
++            if(FAILED(hr)) {
++                fprintf(stderr,"[HW TARGET] depth allocation failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
++                return 0;
++            }
++            ++g.sync_interval.allocations[1];
+@@ -303 +499 @@
+-    g.target=*s;return 1;
++    return 1;
+@@ -313 +509 @@
+-    for(i=0;i<TEXTURE_CACHE_SIZE;i++)if(g.textures[i].srv &&g.textures[i].desc.raw==t->raw&&g.textures[i].desc.format==t->format&&g.textures[i].desc.width==t->width&&g.textures[i].desc.height==t->height&&g.textures[i].desc.cube==t->cube&&g.textures[i].desc.levels==t->levels){entry=&g.textures[i];break;}
++    for(i=0;i<TEXTURE_CACHE_SIZE;i++)if(g.textures[i].srv &&g.textures[i].desc.raw==t->raw&&g.textures[i].desc.format==t->format&&g.textures[i].desc.width==t->width&&g.textures[i].desc.height==t->height&&g.textures[i].desc.cube==t->cube&&g.textures[i].desc.linear==t->linear&&g.textures[i].desc.levels==t->levels&&g.textures[i].desc.bgra_pitch==t->bgra_pitch){entry=&g.textures[i];break;}
+@@ -330 +526,5 @@
+-    uint32_t *pixels=malloc(face_texels*faces*4);if(!pixels)return NULL;
++    int direct=t->raw&&t->width&&t->height&&t->bgra_pitch&&t->linear&&!t->cube&&
++        t->levels<=1&&t->format==0x12&&(uint64_t)w*4<=t->bgra_pitch&&
++        (uint64_t)(h-1)*t->bgra_pitch+(uint64_t)w*4<=t->raw_bytes;
++    uint32_t *pixels=NULL;
++    if(!direct){pixels=malloc(face_texels*faces*4);if(!pixels)return NULL;}
+@@ -332 +532,4 @@
+-    for(f=0;f<faces;f++)for(uint32_t lv=0;lv<levels;lv++) {
++    if(direct) {
++        data[0].pSysMem=entry->copy;data[0].SysMemPitch=t->bgra_pitch;
++        ++g.direct_uploads;
++    } else for(f=0;f<faces;f++)for(uint32_t lv=0;lv<levels;lv++) {
+@@ -344 +547 @@
+-    if(g.uploads%500==0){LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW TEXTURE] calls=%llu hits=%llu uploads=%llu decode %.2f ms/upload upload %.2f ms/upload last=%p %ux%u fmt=%02X texels=%llu\n",(unsigned long long)g.tex_calls,(unsigned long long)g.tex_hits,(unsigned long long)g.uploads,g.tex_decode_ticks*1000.0/freq.QuadPart/g.uploads,g.tex_upload_ticks*1000.0/freq.QuadPart/g.uploads,t->raw,w,h,t->format,(unsigned long long)g.texels);}
++    if(g.uploads%500==0){LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW TEXTURE] calls=%llu hits=%llu uploads=%llu direct=%llu decode %.2f ms/upload upload %.2f ms/upload last=%p %ux%u fmt=%02X texels=%llu\n",(unsigned long long)g.tex_calls,(unsigned long long)g.tex_hits,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads,g.tex_decode_ticks*1000.0/freq.QuadPart/g.uploads,g.tex_upload_ticks*1000.0/freq.QuadPart/g.uploads,t->raw,w,h,t->format,(unsigned long long)g.texels);}
+@@ -539,0 +743,13 @@
++int nv2a_hw_present_source(const unsigned char *color,uint32_t pitch,uint32_t width,uint32_t height,
++                           void **device,void **context,void **resource)
++{
++    if(device)*device=NULL;if(context)*context=NULL;if(resource)*resource=NULL;
++    if(!device||!context||!resource||!nv2a_hw_enabled())return 0;
++    *device=g.device;*context=g.ctx;
++    if(!g.color||g.target.bpp!=4||g.target.color!=color||g.target.pitch!=pitch||
++       g.target.width!=width||g.target.height!=height||g.color_dirty||
++       g.completed_draws!=g.draws||!g.color_loaded||!g.color_cpu_valid)return 1;
++    for(uint32_t y=0;y<height;y++)
++        if(memcmp(color+(size_t)y*pitch,g.color_cpu_copy+(size_t)y*width*4,width*4))return 1;
++    *resource=g.color;return 1;
++}
+@@ -542,0 +759,4 @@
++    report_sync_stats();
++    for(i=0;i<TARGET_POOL_SIZE;i++) {
++        release_storage(&g.target_pool[0][i]);release_storage(&g.target_pool[1][i]);
++    }
+@@ -549 +769 @@
+-    fprintf(stderr,"[HW GPU] draws=%llu syncs=%llu texture uploads=%llu\n",(unsigned long long)g.draws,(unsigned long long)g.syncs,(unsigned long long)g.uploads);memset(&g,0,sizeof g);
++    fprintf(stderr,"[HW GPU] draws=%llu syncs=%llu texture uploads=%llu direct=%llu\n",(unsigned long long)g.draws,(unsigned long long)g.syncs,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads);memset(&g,0,sizeof g);
+@@ -556,0 +777,6 @@
++int nv2a_hw_present_source(const unsigned char *color,uint32_t pitch,uint32_t width,uint32_t height,
++                           void **device,void **context,void **resource)
++{
++    (void)color;(void)pitch;(void)width;(void)height;
++    if(device)*device=NULL;if(context)*context=NULL;if(resource)*resource=NULL;return 0;
++}
+--- before/src/kernel/nv2a_hw_raster.h
++++ current/src/kernel/nv2a_hw_raster.h
+@@ -14,0 +15,3 @@
++    /* Opt in only when linear LIN_A8R8G8B8 bytes match BGRA8 directly.
++     * Nonzero permits a bounds-checked single-level upload using this pitch. */
++    uint32_t bgra_pitch;
+@@ -55,0 +59,7 @@
++/* Borrowed D3D11 objects for presentation on the renderer's calling thread.
++ * A matching, completed 32-bit target is returned only while its CPU backing
++ * still matches the synchronized snapshot. Otherwise resource is NULL and
++ * the caller can upload the provided CPU pixels using the returned device.
++ * A zero result leaves all outputs NULL (no hardware presentation device). */
++int nv2a_hw_present_source(const unsigned char *color,uint32_t pitch,uint32_t width,uint32_t height,
++                           void **device,void **context,void **resource);
+--- before/src/kernel/nv2a_pb_exec.c
++++ current/src/kernel/nv2a_pb_exec.c
+@@ -34,0 +35 @@
++#include "../video/fb_gpu_present.h"
+@@ -38,0 +40 @@
++#include "nv2a_vsh_hlsl.h"
+@@ -2164,0 +2167 @@
++static uint64_t s_hw_attr_reads,s_hw_attr_slots;
+@@ -2217,0 +2221,3 @@
++        /* Only this linear format is already byte-identical to sampled BGRA.
++         * The backend checks pitch/extent and retains its decoded fallback. */
++        out->bgra_pitch=(t->color==0x12&&out->linear&&out->levels==1&&!out->cube)?t->pitch:0;
+@@ -2225,0 +2232,4 @@
++        static int gather_all=-1;
++        if(gather_all<0)gather_all=getenv("RECOMP_HW_VSH_GATHER_ALL")!=NULL;
++        uint32_t input_mask=gather_all?0xFFFFu:nv2a_vsh_input_mask(program);
++        uint32_t input_count=0;for(uint32_t a=0;a<16;a++)if(input_mask&(1u<<a))++input_count;
+@@ -2232 +2242,3 @@
+-                for(uint32_t a=0;a<16;a++)fetch_attr(&s_gpu.attr[a],s_gpu.idx[i],s_hw_inputs[unique][a]);
++                for(uint32_t a=0;a<16;a++)if(input_mask&(1u<<a)) {
++                    fetch_attr(&s_gpu.attr[a],s_gpu.idx[i],s_hw_inputs[unique][a]);
++                }
+@@ -2238,0 +2251 @@
++        s_hw_attr_slots+=(uint64_t)unique*16;s_hw_attr_reads+=(uint64_t)unique*input_count;
+@@ -3070 +3083,2 @@
+-        if(param && nv2a_hw_complete()) {
++        if(param) {
++            if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+@@ -3073 +3087 @@
+-            xbox_Nv2aFenceBatchFlush();
++            if(!xbox_Nv2aFenceBatchFlush())return;
+@@ -3078 +3092 @@
+-        nv2a_hw_complete();
++        if(!nv2a_hw_complete())xbox_Nv2aFenceBatchFail();
+@@ -3087 +3101,4 @@
+-        if(!nv2a_hw_complete())return;
++        /* Preserve the original release execution barrier even when the
++         * frontend defers the store. Gameplay comparisons with this wait
++         * deferred stalled in the title's graphics-event path. */
++        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+@@ -3268,2 +3285,4 @@
+-         * must not depend on the subsequent wait command. */
+-        if(!nv2a_hw_sync())return;
++         * must not depend on the subsequent wait command. Completion makes
++         * guest color pixels coherent; private managed depth can stay on the
++         * GPU until a CPU raster, clear or target change needs it. */
++        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+@@ -3305,2 +3324,28 @@
+-                xbox_FramebufferWindowSet(dma_resolve(done), pitch);
+-                xbox_FramebufferWindowPresent(dma_resolve(done), pitch);
++                uint32_t address = dma_resolve(done);
++                int presented = 0, gpu_pending = 0;
++                xbox_FramebufferWindowSet(address, pitch);
++                /* The existing window displays 640x480 BGRA or RGB565. Keep
++                 * RGB565/pinned/software presentation on its original path.
++                 * CPU color is coherent here regardless of the host display
++                 * path; movies can therefore use a completed CPU upload. */
++                if (nv2a_gpu_present_enabled() && pitch / 640 == 4) {
++                    void *device, *context, *resource;
++                    const unsigned char *pixels = (const unsigned char *)
++                        xbox_GetMemoryOffset() + address;
++                    if (nv2a_hw_present_source(pixels, pitch, 640, 480,
++                                               &device, &context, &resource)) {
++                        if (xbox_FramebufferWindowGpuRequest(1))
++                            presented = nv2a_gpu_present(device, context, resource,
++                                pixels, pitch, 640, 480, xbox_FramebufferWindowHandle());
++                        else
++                            gpu_pending = xbox_FramebufferWindowHandle() != NULL;
++                    }
++                }
++                if (!presented && !gpu_pending) {
++                    /* Release DXGI before the window resumes GDI. Its message
++                     * thread never waits for this rendering thread. */
++                    nv2a_gpu_present_shutdown();
++                    xbox_FramebufferWindowGpuRequest(0);
++                }
++                if (!presented)
++                    xbox_FramebufferWindowPresent(address, pitch);
+@@ -3344 +3389 @@
+-        if(!nv2a_hw_sync())return;
++        if(!nv2a_hw_complete()){xbox_Nv2aFenceBatchFail();return;}
+@@ -3630 +3675 @@
+-        static uint64_t last_pack,last_submit,last_rows;static uint32_t last_raw_flips;
++        static uint64_t last_pack,last_submit,last_rows,last_attr_reads,last_attr_slots;static uint32_t last_raw_flips;
+@@ -3632,0 +3678,4 @@
++        if(raw_frames)fprintf(stderr,"[HW GATHER] attributes %llu/%llu per frame\n",
++            (unsigned long long)((s_hw_attr_reads-last_attr_reads)/raw_frames),
++            (unsigned long long)((s_hw_attr_slots-last_attr_slots)/raw_frames));
++        last_attr_reads=s_hw_attr_reads;last_attr_slots=s_hw_attr_slots;
+--- before/src/kernel/nv2a_pb_scan.c
++++ current/src/kernel/nv2a_pb_scan.c
+@@ -37,0 +38 @@
++extern void xbox_Nv2aFenceBatchFail(void);
+@@ -195,0 +197,7 @@
++static void pb_reject(uint32_t *unknown)
++{
++    ++*unknown;
++    /* A later trapped method must not publish releases from a prefix whose
++     * command walk has already failed. Earlier completed prefixes stay valid. */
++    if(s_exec_enabled)xbox_Nv2aFenceBatchFail();
++}
+@@ -219 +227 @@
+-        if(!pb_readable(va,4)){pb_capture_first(root_start,root_end,va,0);fprintf(stderr,"[PB ERROR] unreadable command=%08X\n",va);(*unknown)++;break;}
++        if(!pb_readable(va,4)){pb_capture_first(root_start,root_end,va,0);fprintf(stderr,"[PB ERROR] unreadable command=%08X\n",va);pb_reject(unknown);break;}
+@@ -235 +243 @@
+-            if(!return_va){if(child)(*unknown)++;break;}
++            if(!return_va){if(child)pb_reject(unknown);break;}
+@@ -239 +247 @@
+-            if(return_va){pb_capture_first(root_start,root_end,from,w);(*unknown)++;break;}
++            if(return_va){pb_capture_first(root_start,root_end,from,w);pb_reject(unknown);break;}
+@@ -244 +252 @@
+-        if(!resumed&&(w&0xE0030003u)!=0&&(w&0xE0030003u)!=0x40000000u){pb_capture_first(root_start,root_end,from,w);(*unknown)++;continue;}
++        if(!resumed&&(w&0xE0030003u)!=0&&(w&0xE0030003u)!=0x40000000u){pb_capture_first(root_start,root_end,from,w);pb_reject(unknown);continue;}
+@@ -250 +258 @@
+-            if(!pb_readable(va,4)){(*unknown)++;return words;}
++            if(!pb_readable(va,4)){pb_reject(unknown);return words;}
+@@ -259 +267 @@
+-                if(record!=va+4||!pb_readable(record,s_nop_next+4)){fprintf(stderr,"[PB ERROR] bad NOP record marker=%08X pc=%08X\n",parameter,va);(*unknown)++;return words;}
++                if(record!=va+4||!pb_readable(record,s_nop_next+4)){fprintf(stderr,"[PB ERROR] bad NOP record marker=%08X pc=%08X\n",parameter,va);pb_reject(unknown);return words;}
+@@ -261 +269 @@
+-                if((next&3)||next<record+s_nop_next+4||next>end_va){fprintf(stderr,"[PB ERROR] bad NOP continuation=%08X record=%08X\n",next,record);(*unknown)++;return words;}
++                if((next&3)||next<record+s_nop_next+4||next>end_va){fprintf(stderr,"[PB ERROR] bad NOP continuation=%08X record=%08X\n",next,record);pb_reject(unknown);return words;}
+@@ -284 +292 @@
+-        (*unknown)++;
++        pb_reject(unknown);
+--- before/src/kernel/xbox_memory_layout.c
++++ current/src/kernel/xbox_memory_layout.c
+@@ -18,0 +19 @@
++#include "../video/fb_gpu_present.h"
+@@ -706 +707 @@
+-static RECOMP_TLS unsigned g_fence_batch_depth,g_pending_fence_count;
++static RECOMP_TLS unsigned g_fence_batch_depth,g_pending_fence_count,g_fence_batch_failed;
+@@ -713,4 +714,18 @@
+-    if(!g_fence_batch_depth++)g_pending_fence_count=0;
+-}
+-void xbox_Nv2aFenceBatchFlush(void)
+-{
++    if(!g_fence_batch_depth++) {
++        g_pending_fence_count=0;
++        g_fence_batch_failed=0;
++    }
++}
++int xbox_Nv2aFenceBatchActive(void)
++{
++    return g_fence_batch_depth!=0;
++}
++void xbox_Nv2aFenceBatchFail(void)
++{
++    if(g_fence_batch_depth)g_fence_batch_failed=1;
++}
++int xbox_Nv2aFenceBatchFlush(void)
++{
++    /* Never acknowledge a rejected prefix, including a release-list overflow.
++     * Flushing to make room would let the CPU reuse commands still unread. */
++    if(g_fence_batch_failed)return 0;
+@@ -719,0 +735 @@
++    return 1;
+@@ -723,2 +739,4 @@
+-    if(!g_fence_batch_depth||--g_fence_batch_depth)return;
+-    if(commit)for(unsigned i=0;i<g_pending_fence_count;i++)
++    if(!g_fence_batch_depth)return;
++    if(!commit)g_fence_batch_failed=1;
++    if(--g_fence_batch_depth)return;
++    if(!g_fence_batch_failed)for(unsigned i=0;i<g_pending_fence_count;i++)
+@@ -726,0 +745 @@
++    g_fence_batch_failed=0;
+@@ -730 +749 @@
+-    return g_pending_fence_count!=0;
++    return !g_fence_batch_failed&&g_pending_fence_count!=0;
+@@ -803 +822 @@
+-            if(j==64)return 0;
++            if(j==64){xbox_Nv2aFenceBatchFail();return 0;}
+@@ -2936,0 +2956,16 @@
++    if (g_nv2a_ack_thread) {
++        InterlockedExchange(&g_nv2a_ack_stop, 1);
++        if(WaitForSingleObject(g_nv2a_ack_thread, 1000)!=WAIT_OBJECT_0) {
++            /* A timeout is not consumer completion. Leave its device and
++             * guest backing alive; a later shutdown can retry after it exits. */
++            fprintf(stderr,"[HW SHUTDOWN] consumer still active; backing retained\n");
++            return;
++        }
++        CloseHandle(g_nv2a_ack_thread);
++        g_nv2a_ack_thread = NULL;
++    }
++    /* Release presentation references before the raster device, then permit
++     * the window's CPU path again. */
++    nv2a_gpu_present_shutdown();
++    xbox_FramebufferWindowGpuRequest(0);
++    nv2a_hw_shutdown();
+@@ -2941,7 +2975,0 @@
+-    if (g_nv2a_ack_thread) {
+-        InterlockedExchange(&g_nv2a_ack_stop, 1);
+-        WaitForSingleObject(g_nv2a_ack_thread, 1000);
+-        CloseHandle(g_nv2a_ack_thread);
+-        g_nv2a_ack_thread = NULL;
+-    }
+-    nv2a_hw_shutdown();
+--- before/src/kernel/xbox_memory_layout.h
++++ current/src/kernel/xbox_memory_layout.h
+@@ -199,0 +200 @@
++int xbox_Nv2aFenceBatchActive(void);
+@@ -200,0 +202 @@
++void xbox_Nv2aFenceBatchFail(void);
+@@ -524 +526 @@
+-void xbox_Nv2aFenceBatchFlush(void);
++int xbox_Nv2aFenceBatchFlush(void);
+--- before/src/video/fb_present.c
++++ current/src/video/fb_present.c
+@@ -6,8 +6,8 @@
+- * out. Nothing here scans anything out, so however much of the GPU is
+- * implemented, none of it is observable. This is the other half: a window that
+- * reads that memory and puts it on screen.
+- *
+- * Deliberately plain GDI rather than the D3D8 layer. The point is to display
+- * whatever the guest actually wrote, so the fewer stages between guest memory
+- * and the screen the better -- and it must keep working while the D3D8 layer
+- * is busy with something else, such as the FMV player's own window.
++ * out. This window displays the completed frame supplied by the pushbuffer
++ * executor and also owns keyboard, focus and window-close handling.
++ *
++ * The default GDI path displays coherent guest-memory copies independently of
++ * the D3D8 layer. With RECOMP_HW_PRESENT, the executor can use its D3D11 device
++ * and fb_gpu_present.c to present GPU textures or completed CPU pixels into
++ * this same window. The message thread acknowledges its last GDI operation
++ * before GPU presentation starts, then continues handling input and messages.
+@@ -17,0 +18,2 @@
++#include <stddef.h>
++#include "fb_gpu_present.h"
+@@ -27,0 +30,4 @@
++static void *volatile s_fb_window;
++/* 0: GDI, 1: renderer requested GPU mode, 2: window acknowledged after its
++ * final GDI blit. Only the window thread promotes 1 to 2. */
++static volatile LONG s_gpu_present_mode;
+@@ -44,0 +51,23 @@
++void *xbox_FramebufferWindowHandle(void)
++{
++    return InterlockedCompareExchangePointer(&s_fb_window, NULL, NULL);
++}
++
++int xbox_FramebufferWindowGpuRequest(int enable)
++{
++    if (!enable) {
++        InterlockedExchange(&s_gpu_present_mode, 0);
++        return 1;
++    }
++    if (!InterlockedCompareExchange(&s_fb_running, 0, 0) || getenv("RECOMP_FB_VA"))
++        return 0;
++    InterlockedCompareExchange(&s_gpu_present_mode, 1, 0);
++    return InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) == 2 &&
++           xbox_FramebufferWindowHandle() != NULL;
++}
++
++int xbox_FramebufferWindowGpuActive(void)
++{
++    return InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) == 2;
++}
++
+@@ -65,0 +95,2 @@
++        return;
++    if (xbox_FramebufferWindowGpuActive())
+@@ -148,0 +180 @@
++        InterlockedExchangePointer(&s_fb_window, NULL);
+@@ -227 +259,3 @@
+-    if (!s_rgb || !s_fb_va)
++    /* GPU frames are captured by the executor's synchronized flip capture.
++     * The window thread must not claim its stale GDI pixels are that frame. */
++    if (!s_rgb || !s_fb_va || xbox_FramebufferWindowGpuActive())
+@@ -291,0 +326 @@
++    InterlockedExchangePointer(&s_fb_window, hwnd);
+@@ -313 +348,8 @@
+-        if (s_present_idx >= 0 && s_rgb) {
++        if (!InterlockedCompareExchange(&s_fb_running, 0, 0))
++            break;
++        /* Acknowledge only here, after any preceding iteration's GDI call has
++         * returned. The GPU thread never waits while holding a graphics lock;
++         * it retries at a later flip until this nonblocking handoff completes. */
++        InterlockedCompareExchange(&s_gpu_present_mode, 2, 1);
++        if (!InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) &&
++            s_present_idx >= 0 && s_rgb) {
+@@ -324 +366,2 @@
+-        } else if (s_fb_va && s_fb_pitch && s_rgb) {
++        } else if (!InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) &&
++                   s_fb_va && s_fb_pitch && s_rgb) {
+@@ -376,0 +420,2 @@
++    InterlockedExchangePointer(&s_fb_window, NULL);
++    InterlockedExchange(&s_gpu_present_mode, 0);
+@@ -397,0 +443,3 @@
++void *xbox_FramebufferWindowHandle(void) { return NULL; }
++int xbox_FramebufferWindowGpuRequest(int enable) { (void)enable; return 0; }
++int xbox_FramebufferWindowGpuActive(void) { return 0; }
+--- before/tests/nv2a_gpu/raster_test.c
++++ current/tests/nv2a_gpu/raster_test.c
+@@ -16,0 +17,6 @@
++static uint32_t bgra_rows[6]={0x50102030,0xFFA0B0C0,0xDEADBEEF,0xFF405060,0x80224466,0xBADC0FFE};
++static unsigned bgra_samples;
++static uint32_t bgra_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
++{(void)opaque;assert(face==0&&x<2&&y<2);++bgra_samples;return bgra_rows[y*3+x];}
++static uint32_t bgra_alternate_sample(void *opaque,uint32_t face,uint32_t x,uint32_t y)
++{return bgra_sample(opaque,face,x,y)^0x00FFFFFF;}
+@@ -156 +162,173 @@
+-    nv2a_hw_shutdown();puts("Hardware raster, coherence, mip selection and mip freshness passed");return 0;
++    /* Opted-in linear BGRA upload consumes row pitch directly, including
++     * alpha, without sampling padding or calling the generic decoder. */
++    s.textures[0]=(Nv2aHwTexture){0};
++    s.textures[0].width=s.textures[0].height=2;s.textures[0].linear=1;
++    s.textures[0].format=0x12;s.textures[0].levels=1;s.textures[0].bgra_pitch=12;
++    s.textures[0].raw=bgra_rows;s.textures[0].raw_bytes=sizeof bgra_rows;s.textures[0].sample=bgra_sample;
++    s.textures[0].filter=(1u<<16)|(1u<<24);
++    for(i=0;i<4;i++){v[i].tex[0][0]=(i&1)?2:0;v[i].tex[0][1]=(i&2)?2:0;}
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(bgra_samples==0);
++    assert(other[8*32+8]==bgra_rows[0]);assert(other[8*32+24]==bgra_rows[1]);
++    assert(other[24*32+8]==bgra_rows[3]);assert(other[24*32+24]==bgra_rows[4]);
++    bgra_rows[4]=0x60ABCDEF;
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(other[24*32+24]==bgra_rows[4]);assert(bgra_samples==0);
++    bgra_rows[2]^=0x00FFFFFF; /* Padding remains outside visible texels. */
++    s.textures[0].raw_bytes=20; /* Last-row padding is not required. */
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(other[8*32+8]==bgra_rows[0]);assert(other[24*32+24]==bgra_rows[4]);assert(bgra_samples==0);
++    s.textures[0].raw_bytes=19; /* An incomplete last pixel uses the callback. */
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(bgra_samples==4);
++    assert(other[24*32+24]==bgra_rows[4]);
++    s.textures[0].raw_bytes=sizeof bgra_rows;s.textures[0].bgra_pitch=4;
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(bgra_samples==8);
++    s.textures[0].bgra_pitch=0; /* Generic descriptors retain their callback semantics. */
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(bgra_samples==12);
++    /* Linear eligibility is part of the cache identity. An unchanged raw
++     * snapshot cannot reuse a direct upload when generic sampling is needed. */
++    s.textures[0].bgra_pitch=12;s.textures[0].sample=bgra_alternate_sample;
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(bgra_samples==12);
++    s.textures[0].linear=0;
++    for(i=0;i<4;i++){v[i].tex[0][0]=(i&1)?1:0;v[i].tex[0][1]=(i&2)?1:0;}
++    assert(nv2a_hw_draw(&s,v,4,indices,6));assert(nv2a_hw_sync());assert(bgra_samples==16);
++    assert(other[8*32+8]==(bgra_rows[0]^0x00FFFFFF));
++    assert(other[24*32+24]==(bgra_rows[4]^0x00FFFFFF));
++
++    /* GPU presentation borrows only a matching, completed, unchanged BGRA
++     * target. CPU movie pixels and mismatched layouts request an upload. */
++    void *device,*context,*resource;
++    int retained=getenv("RECOMP_HW_COLOR_RELOAD")==NULL;
++    assert(nv2a_hw_present_source(s.color,s.pitch,s.width,s.height,&device,&context,&resource));
++    assert(device&&context&&(!!resource==retained));
++    uint32_t saved=other[16*32+16];other[16*32+16]^=1;
++    assert(nv2a_hw_present_source(s.color,s.pitch,s.width,s.height,&device,&context,&resource));assert(!resource);
++    other[16*32+16]=saved;
++    assert(nv2a_hw_present_source(s.color,s.pitch+4,s.width,s.height,&device,&context,&resource));assert(!resource);
++    assert(nv2a_hw_present_source((const unsigned char*)pixels,s.pitch,s.width,s.height,&device,&context,&resource));assert(!resource);
++
++    /* A target switch publishes pending work into the old backing before
++     * reusing its same-sized native allocation. The new partial mask must
++     * preserve the new backing's untouched channels. */
++    Nv2aHwState r={0};r.width=r.height=r.clip_w=r.clip_h=32;r.pitch=128;r.bpp=4;
++    r.depth_scale=10;r.color_mask=0x01010101;r.use_rc=1;r.rc.final0=1;r.rc.final1=0x1100;
++    r.surface=10;r.color=(unsigned char*)pixels;r.rc.final_c0=0xFF102030;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));
++    assert(nv2a_hw_present_source(r.color,r.pitch,r.width,r.height,&device,&context,&resource));assert(!resource);
++    for(i=0;i<1024;i++)other[i]=0xFF445566;
++    r.surface=11;r.color=(unsigned char*)other;r.color_mask=0x10000;r.rc.final_c0=0xFFAABBCC;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(pixels[16*32+16]==0xFF102030);
++    assert(nv2a_hw_complete());assert(other[16*32+16]==0xFFAA5566);
++
++    /* A depth-only target switch cannot validate an old surface's retained
++     * CPU snapshot, even when its allocation and snapshot storage survive. */
++    static uint32_t third[32*32];static float third_depth[1024*32],fourth_depth[1024*32];
++    for(i=0;i<1024;i++)third[i]=0xFFE1D2C3;
++    for(i=0;i<1024*32;i++){third_depth[i]=10;fourth_depth[i]=8;}
++    r.surface=12;r.color=(unsigned char*)third;r.zeta=13;r.depth=third_depth;r.depth_revision=1;
++    r.color_mask=0;r.depth_test=r.depth_mask=1;r.depth_func=0x207;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_complete());assert(third[16*32+16]==0xFFE1D2C3);
++    r.depth_test=r.depth_mask=0;r.color_mask=0x10000;r.rc.final_c0=0xFF781122;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_sync());assert(third[16*32+16]==0xFF78D2C3);
++
++    /* Reusing a same-sized depth allocation downloads its previous backing
++     * and uploads the new plane before evaluating a depth-tested draw. */
++    r.depth_test=r.depth_mask=1;r.color_mask=0;
++    for(i=0;i<4;i++)v[i].pos[2]=0.25f;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));
++    r.zeta=14;r.depth=fourth_depth;r.depth_revision=2;r.depth_func=0x201;
++    for(i=0;i<4;i++)v[i].pos[2]=2;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(fabsf(third_depth[16*1024+16]-0.25f)<0.001f);
++    assert(nv2a_hw_complete());assert(fourth_depth[16*1024+16]==8);
++    assert(nv2a_hw_sync());assert(fabsf(fourth_depth[16*1024+16]-2)<0.001f);
++
++    /* Changing pitch alone publishes pending rows using the old layout,
++     * then preserves the new layout's channels on a partial-mask draw. */
++    static uint32_t padded[40*32];for(i=0;i<40*32;i++)padded[i]=0xFF112233;
++    r.surface=15;r.color=(unsigned char*)padded;r.depth=NULL;r.depth_test=r.depth_mask=0;
++    r.color_mask=0x01010101;r.rc.final_c0=0xFFEEDDCC;r.pitch=128;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));
++    r.pitch=160;r.color_mask=0x10000;r.rc.final_c0=0xFFAA0000;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(padded[31*32+16]==0xFFEEDDCC);
++    assert(nv2a_hw_sync());assert(padded[31*40+16]==0xFFAA2233);assert(padded[8*40+8]==0xFFAADDCC);
++    assert(nv2a_hw_present_source(r.color,r.pitch,r.width,r.height,&device,&context,&resource));assert(!!resource==retained);
++
++    /* Sixteen-bit reuse retains the existing quantized readback semantics. */
++    static uint16_t rgb565_a[32*32],rgb565_b[32*32];
++    for(i=0;i<1024;i++)rgb565_b[i]=0x07E0;
++    r.surface=16;r.color=(unsigned char*)rgb565_a;r.pitch=64;r.bpp=2;r.color_mask=0x01010101;r.rc.final_c0=0xFF0000FF;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));
++    r.surface=17;r.color=(unsigned char*)rgb565_b;r.color_mask=0x10000;r.rc.final_c0=0xFFFF0000;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(rgb565_a[16*32+16]==0x001F);
++    assert(nv2a_hw_sync());assert(rgb565_b[16*32+16]==0xFFE0);
++    assert(nv2a_hw_present_source(r.color,r.pitch,r.width,r.height,&device,&context,&resource));assert(!resource);
++    /* A new managed-depth revision must not invalidate color after its
++     * upload. The first half-frame survives a second draw before any fence. */
++    for(i=0;i<1024;i++)third[i]=0xFF112233;
++    for(i=0;i<1024*32;i++)third_depth[i]=10;
++    r.surface=18;r.color=(unsigned char*)third;r.pitch=128;r.bpp=4;
++    r.zeta=19;r.depth=third_depth;r.depth_revision=99;r.depth_test=r.depth_mask=1;r.depth_func=0x207;
++    r.color_mask=0x01010101;r.clip_x=0;r.clip_w=16;r.rc.final_c0=0xFFFF0000;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));
++    r.clip_x=16;r.rc.final_c0=0xFF00FF00;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(third[16*32+8]==0xFFFF0000);assert(third[16*32+24]==0xFF00FF00);
++    /* A setup failure after uploading CPU changes leaves no valid GPU/CPU
++     * snapshot. Even if CPU fallback restores the previous readback bytes,
++     * presentation and the next overlay cannot trust the changed GPU image. */
++    for(i=0;i<1024;i++)third[i]=0xFF112233;
++    Nv2aHwState rejected=r;rejected.rc.stage_program=1;
++    rejected.textures[0].width=65536;rejected.textures[0].height=1; /* Beyond D3D11 texture limits. */
++    assert(!nv2a_hw_draw(&rejected,v,4,indices,6));assert(nv2a_hw_sync());
++    for(i=0;i<1024;i++)third[i]=(i%32<16)?0xFFFF0000:0xFF00FF00;
++    assert(nv2a_hw_present_source(r.color,r.pitch,r.width,r.height,&device,&context,&resource));assert(!resource);
++    r.depth_test=r.depth_mask=0;r.clip_x=0;r.clip_w=32;r.color_mask=0x10000;r.rc.final_c0=0xFFAA0000;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(third[16*32+8]==0xFFAA0000);assert(third[16*32+24]==0xFFAAFF00);
++    /* Alternate dimensions beyond the bounded allocation pool's capacity,
++     * then revisit them in reverse order. Every reuse (or eviction) must
++     * reload CPU color channels and the current managed-depth revision. */
++    r.color=(unsigned char*)third;r.depth=third_depth;r.pitch=128;r.bpp=4;
++    r.depth_test=r.depth_mask=1;r.depth_func=0x201;r.color_mask=0x10000;
++    r.rc.final_c0=0xFFAA0000;r.clip_x=r.clip_y=0;
++    for(unsigned pass=0;pass<28;pass++) {
++        unsigned dimension=pass<14?pass:27-pass;
++        uint32_t cpu_color=0xFF002233|((pass+1)<<16);
++        float cpu_depth=pass&1?1.0f:10.0f;
++        for(i=0;i<1024;i++)third[i]=cpu_color;
++        for(i=0;i<1024*32;i++)third_depth[i]=cpu_depth;
++        r.surface=20+pass;r.zeta=100+pass;r.depth_revision=100+pass;
++        r.width=r.clip_w=16+dimension;r.height=r.clip_h=16+dimension%3;
++        for(i=0;i<4;i++)v[i].pos[2]=2;
++        assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_complete());
++        assert(third[8*32+8]==(pass&1?cpu_color:0xFFAA2233));
++        assert(third[31*32+31]==cpu_color); /* Outside the new target. */
++        assert(nv2a_hw_sync());
++        assert(fabsf(third_depth[8*1024+8]-(pass&1?1.0f:2.0f))<0.001f);
++        assert(third_depth[31*1024+31]==cpu_depth);
++    }
++    /* A wide, tightly packed BGRA target exercises contiguous readback.
++     * The last pixel and a CPU edit there must survive exact-snapshot checks. */
++    static uint32_t wide[256*8];
++    Nv2aHwState packed={0};packed.surface=200;packed.width=packed.clip_w=256;
++    packed.height=packed.clip_h=8;packed.pitch=1024;packed.bpp=4;
++    packed.color=(unsigned char*)wide;packed.depth_scale=10;packed.color_mask=0x10000;
++    packed.use_rc=1;packed.rc.final0=1;packed.rc.final1=0x1100;packed.rc.final_c0=0xFF660000;
++    for(i=0;i<256*8;i++)wide[i]=0xFE114477;
++    for(i=0;i<4;i++){v[i].pos[0]=(i&1)?256:0;v[i].pos[1]=(i&2)?8:0;}
++    assert(nv2a_hw_draw(&packed,v,4,indices,6));assert(nv2a_hw_sync());
++    for(i=0;i<256*8;i++)assert(wide[i]==0xFE664477);
++    wide[256*8-1]=0xFE22AA99;packed.rc.final_c0=0xFF550000;
++    assert(nv2a_hw_draw(&packed,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(wide[256*8-1]==0xFE55AA99);assert(wide[0]==0xFE554477);
++    for(i=0;i<4;i++){v[i].pos[0]=(i&1)?32:0;v[i].pos[1]=(i&2)?32:0;}
++    nv2a_hw_shutdown();
++    /* Shutdown releases every pooled resource along with the device. A fresh
++     * device must initialize from the new backing, with no retained snapshot. */
++    for(i=0;i<1024;i++)third[i]=0xFE998877;
++    for(i=0;i<1024*32;i++)third_depth[i]=10;
++    ++r.depth_revision;
++    assert(nv2a_hw_draw(&r,v,4,indices,6));assert(nv2a_hw_sync());
++    assert(third[8*32+8]==0xFEAA8877);
++    assert(fabsf(third_depth[8*1024+8]-2)<0.001f);
++    nv2a_hw_shutdown();puts("Hardware raster, coherence, bounded target pool, direct BGRA, mip freshness and presentation source passed");return 0;
+@@ -158 +335,0 @@
+-
+--- before/tests/nv2a_semaphore/semaphore_test.c
++++ current/tests/nv2a_semaphore/semaphore_test.c
+@@ -2,0 +3 @@
++#include "nv2a_hw_raster.h"
+@@ -5,0 +7 @@
++#include <string.h>
+@@ -9,0 +12 @@
++extern void nv2a_pb_scan(uint32_t start, uint32_t end);
+@@ -39 +42,6 @@
+-    assert(argc == 2);
++    assert(argc==2||(argc==3&&strcmp(argv[2],"--gpu")==0));
++    int gpu=argc==3;
++    if(gpu) {
++        _putenv_s("RECOMP_HW_RASTER","1");
++        _putenv_s("RECOMP_PB_EXEC","1");
++    }
+@@ -103,0 +112 @@
++    assert(xbox_Nv2aFenceBatchActive());
+@@ -107,0 +117 @@
++    assert(!xbox_Nv2aFenceBatchActive());
+@@ -112 +122 @@
+-    xbox_Nv2aFenceBatchFlush();
++    assert(xbox_Nv2aFenceBatchFlush());
+@@ -117,0 +128,38 @@
++    /* Nested frontend work still cannot acknowledge an outer unread segment.
++     * A rejected nested walk also rejects the outer pending suffix. */
++    xbox_Nv2aFenceBatchBegin();
++    nv2a_pb_exec_method(0,0x1D70,16);
++    xbox_Nv2aFenceBatchBegin();
++    nv2a_pb_exec_method(0,0x1D70,17);
++    xbox_Nv2aFenceBatchEnd(1);
++    assert(G(fence)==14&&xbox_Nv2aFenceBatchActive());
++    xbox_Nv2aFenceBatchEnd(1);
++    assert(G(fence)==17&&!xbox_Nv2aFenceBatchActive());
++    xbox_Nv2aFenceBatchBegin();
++    nv2a_pb_exec_method(0,0x1D70,18);
++    xbox_Nv2aFenceBatchBegin();xbox_Nv2aFenceBatchEnd(0);
++    assert(!xbox_Nv2aFenceBatchFlush());
++    xbox_Nv2aFenceBatchEnd(1);assert(G(fence)==17);
++    /* A full pending list accepts coalescing, but never publishes a truncated
++     * set when a 65th target arrives. The next batch must recover normally. */
++    G(dev+0x38)=fence;
++    assert(xbox_Nv2aBindSemaphore(12,slot,0x38,260)==0);
++    for(unsigned i=0;i<65;i++)G(fence+i*4)=0xA0000000u+i;
++    xbox_Nv2aFenceBatchBegin();
++    for(unsigned i=0;i<64;i++)assert(xbox_Nv2aReleaseSemaphore(12,i*4,100+i));
++    assert(xbox_Nv2aReleaseSemaphore(12,0,200)); /* Duplicate at capacity. */
++    assert(xbox_Nv2aFenceBatchHasRelease());
++    assert(!xbox_Nv2aReleaseSemaphore(12,64*4,999));
++    assert(!xbox_Nv2aFenceBatchHasRelease()&&!xbox_Nv2aFenceBatchFlush());
++    xbox_Nv2aFenceBatchEnd(1);
++    for(unsigned i=0;i<65;i++)assert(G(fence+i*4)==0xA0000000u+i);
++    xbox_Nv2aFenceBatchBegin();
++    assert(xbox_Nv2aReleaseSemaphore(12,4,201));
++    assert(xbox_Nv2aFenceBatchFlush());assert(G(fence+4)==201);
++    assert(xbox_Nv2aReleaseSemaphore(12,8,202));
++    xbox_Nv2aFenceBatchFail();assert(!xbox_Nv2aFenceBatchFlush());
++    xbox_Nv2aFenceBatchEnd(1);
++    assert(G(fence+4)==201&&G(fence+8)==0xA0000002u);
++    assert(!xbox_Nv2aFenceBatchActive());
++    nv2a_pb_exec_method(0,0x1D70,19);
++    assert(G(fence)==19); /* A standalone release completes immediately. */
+@@ -118,0 +167 @@
++    G(fence+4)=0x12345678;
+@@ -148,0 +198,31 @@
++    if(gpu) {
++        /* Release completes real color work while the semaphore store stays
++         * deferred until the frontend relinquishes unread command storage. */
++        Nv2aHwState hs={0};Nv2aVshOutput vertices[4]={0};
++        uint32_t indices[6]={0,1,2,2,1,3};
++        G(slot)=dev;G(dev+0x30)=fence;
++        nv2a_pb_exec_method(0,0x01A4,8);nv2a_pb_exec_method(0,0x1D6C,0);
++        hs.surface=surface-XBOX_CONTIG_BASE;hs.width=hs.height=hs.clip_w=hs.clip_h=32;
++        hs.pitch=128;hs.bpp=4;hs.depth_scale=1;
++        hs.color=(unsigned char*)((uintptr_t)surface+xbox_GetMemoryOffset());
++        hs.color_mask=0x01010101;hs.use_rc=1;hs.rc.final0=4;hs.rc.final1=0x1400;
++        for(unsigned i=0;i<4;i++) {
++            vertices[i].pos[0]=(i&1)?32:0;vertices[i].pos[1]=(i&2)?32:0;
++            vertices[i].pos[3]=1;vertices[i].d0[0]=vertices[i].d0[3]=1;
++            vertices[i].fog[0]=1;
++        }
++        for(unsigned i=0;i<1024;i++)G(surface+i*4)=0xFF0000FF;
++        G(fence)=30;
++        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
++        xbox_Nv2aFenceBatchBegin();nv2a_pb_exec_method(0,0x1D70,31);
++        assert(G(fence)==30&&G(surface+16*128+16*4)==0xFFFF0000);
++        assert(nv2a_hw_complete());xbox_Nv2aFenceBatchEnd(1);
++        assert(G(fence)==31&&G(surface+16*128+16*4)==0xFFFF0000);
++        for(unsigned i=0;i<4;i++){vertices[i].d0[0]=0;vertices[i].d0[1]=1;}
++        assert(nv2a_hw_draw(&hs,vertices,4,indices,6));
++        assert(G(surface+16*128+16*4)==0xFFFF0000);
++        G(slot+512)=0x41D70;G(slot+516)=32;
++        nv2a_pb_scan(slot+512,slot+520);
++        assert(G(fence)==32&&G(surface+16*128+16*4)==0xFF00FF00);
++        nv2a_hw_shutdown();
++    }
+@@ -153 +232,0 @@
+-
+--- before/tests/nv2a_pb_control/control_test.c
++++ current/tests/nv2a_pb_control/control_test.c
+@@ -12 +12,4 @@
+-static unsigned pending,syncs,releases;
++static unsigned pending,syncs,releases,active,failed,observe_order,notifications,work,completed;
++static int completion_ok=1;
++int nv2a_hw_complete(void);
++int xbox_Nv2aFenceBatchFlush(void);
+@@ -14 +17,12 @@
+-{assert(channel==0&&count<16);seen[count][0]=method;seen[count++][1]=value;if(method==0x1D70)pending=1;}
++{
++    assert(channel==0&&count<16);seen[count][0]=method;seen[count++][1]=value;
++    if(method==0x1D70)pending=1;
++    if(observe_order&&method==0x17FC)++work;
++    if(observe_order&&method==0x100&&value) {
++        assert(nv2a_hw_complete());
++        if(xbox_Nv2aFenceBatchFlush()) {
++            assert(completed==work&&pending==0);
++            ++notifications;
++        }
++    }
++}
+@@ -16,3 +30,5 @@
+-void xbox_Nv2aFenceBatchBegin(void){pending=0;}
+-int xbox_Nv2aFenceBatchHasRelease(void){return pending!=0;}
+-void xbox_Nv2aFenceBatchEnd(int commit){if(commit&&pending)++releases;}
++void xbox_Nv2aFenceBatchBegin(void){assert(!active);active=1;pending=failed=0;}
++int xbox_Nv2aFenceBatchHasRelease(void){return pending&&!failed;}
++void xbox_Nv2aFenceBatchFail(void){failed=1;}
++int xbox_Nv2aFenceBatchFlush(void){if(failed)return 0;if(pending)++releases;pending=0;return 1;}
++void xbox_Nv2aFenceBatchEnd(int commit){if(commit&&!failed&&pending)++releases;active=0;}
+@@ -20 +36 @@
+-int nv2a_hw_complete(void){++syncs;return 1;}
++int nv2a_hw_complete(void){++syncs;if(completion_ok)completed=work;return completion_ok;}
+@@ -66,0 +83,29 @@
++    /* Multiple ordered releases in one submitted segment need one final GPU
++     * completion, with no publication while later draws are still unread. */
++    count=0;observe_order=1;
++    W(0x1000)=0x41D70;W(0x1004)=21;
++    W(0x1008)=0x417FC;W(0x100C)=0;
++    W(0x1010)=0x41D70;W(0x1014)=22;
++    W(0x1018)=0x417FC;W(0x101C)=0;
++    W(0x1020)=0x41D70;W(0x1024)=23;
++    nv2a_pb_scan(0x80001000,0x80001028);
++    assert(count==5&&syncs==2&&releases==2&&completed==work);
++    /* A trap publishes its completed prefix before notification. A rejected
++     * later suffix cannot revoke that prefix or publish a subsequent release. */
++    count=0;W(0x1000)=0x417FC;W(0x1004)=0;
++    W(0x1008)=0x41D70;W(0x100C)=24;
++    W(0x1010)=0x40100;W(0x1014)=1; /* Ordinary nonzero NOP, no CPU record. */
++    W(0x1018)=0x41D70;W(0x101C)=25;W(0x1020)=0xFFFFFFFF;
++    nv2a_pb_scan(0x80001000,0x80001024);
++    assert(notifications==1&&syncs==3&&releases==3);
++    /* Rejection before a trap must suppress both prefix publication and ISR
++     * dispatch, even though the parser can recognize later method headers. */
++    count=0;W(0x1000)=0x41D70;W(0x1004)=26;
++    W(0x1008)=0xFFFFFFFF;W(0x100C)=0x40100;W(0x1010)=1;
++    nv2a_pb_scan(0x80001000,0x80001014);
++    assert(notifications==1&&syncs==4&&releases==3);
++    count=0;completion_ok=0;W(0x1000)=0x41D70;W(0x1004)=27;
++    nv2a_pb_scan(0x80001000,0x80001008);
++    assert(syncs==5&&releases==3); /* A failed GPU barrier acknowledges nothing. */
++    count=0;completion_ok=1;nv2a_pb_scan(0x80001000,0x80001008);
++    assert(syncs==6&&releases==4); /* Failure state does not poison later batches. */

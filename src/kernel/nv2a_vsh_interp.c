@@ -164,6 +164,8 @@ const float *nv2a_vsh_constant(uint32_t index)
     return s_const[index < NV2A_VSH_CONSTANTS ? index : 0];
 }
 
+void nv2a_vsh_dump_current(void) { dump_program(s_start_slot); }
+
 void nv2a_vsh_constant_component(uint32_t index, uint32_t comp, uint32_t word)
 {
     if (index < NV2A_VSH_CONSTANTS && comp < 4)
@@ -305,10 +307,35 @@ static vec4 run_ilu(uint32_t op, vec4 c)
     return r;
 }
 
+int nv2a_vsh_cacheable(void)
+{
+    uint32_t s;
+    if (!s_cxt_write) return 1;
+    for (s = s_start_slot; s < NV2A_VSH_SLOTS; ++s) {
+        const uint32_t *ins = s_program[s];
+        if (field(ins, 3, 12, 4) && !field(ins, 3, 11, 1) &&
+            field(ins, 3, 3, 8) < NV2A_VSH_CONSTANTS) return 0;
+        if (field(ins, 3, 0, 1)) return 1;
+    }
+    return 0;
+}
+
+int nv2a_vsh_snapshot(Nv2aVshSnapshot *out)
+{
+    uint32_t s;
+    out->count=0;out->context_write=s_cxt_write;
+    memcpy(out->constants,s_const,sizeof s_const);
+    for(s=s_start_slot;s<NV2A_VSH_SLOTS;s++) {
+        memcpy(out->words[out->count++],s_program[s],16);
+        if(field(s_program[s],3,0,1))return 1;
+    }
+    out->count=0;return 0;
+}
+
 int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
 {
     static int dump = -1;
-    static uint32_t dumped[16];
+    static uint32_t dumped[128];
     static int ndumped;
     vec4 temp[12], opos;
     float outregs[13][4];
@@ -317,7 +344,7 @@ int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
 
     if (dump < 0)
         dump = getenv("RECOMP_VSH_DUMP") != NULL;
-    if (dump && ndumped < 16) {
+    if (dump && ndumped < 128) {
         /* By content: titles reload different programs into the same slot. */
         uint32_t h = 2166136261u, t;
         int i, seen = 0;
@@ -337,6 +364,9 @@ int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
 
     memset(temp, 0, sizeof temp);
     memset(&opos, 0, sizeof opos);
+    /* Position shaders may write xyz only (the prototype's HUD does this).
+     * An unwritten homogeneous component starts at one. */
+    opos.v[3] = 1.0f;
     memset(outregs, 0, sizeof outregs);
     outregs[3][3] = outregs[4][3] = 1.0f;      /* colours default opaque */
     /* Unwritten texture coordinates are (0,0,0,1), as xemu initialises them:

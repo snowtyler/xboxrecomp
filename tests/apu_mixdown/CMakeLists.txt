@@ -19,3 +19,7 @@ set_tests_properties(apu_mixdown_all PROPERTIES
 add_test(NAME apu_mixdown_two_bins COMMAND apu_mixdown_test)
 set_tests_properties(apu_mixdown_two_bins PROPERTIES
                      ENVIRONMENT "RECOMP_APU_MIXDOWN_ALL=0;APU_MIXDOWN_EXPECT=0")
+add_executable(apu_monitor_test monitor_test.c)
+target_include_directories(apu_monitor_test PRIVATE ../../src ../../src/apu)
+target_link_libraries(apu_monitor_test PRIVATE xboxrecomp)
+add_test(NAME apu_hardware_pcm_output COMMAND apu_monitor_test)

@@ -43,6 +43,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <wctype.h>
+#include "bridge_guest_handles.h"
+static BridgeHandleTable s_guest_handles;
+static BridgeHandleLease bridge_acquire_wait_handle(uint32_t token);
+static void bridge_release_wait_handle(BridgeHandleLease lease);
 
 /* Access to recompiled code registers. Per-thread: RECOMP_TLS comes from
  * xbox_memory_layout.h and must match the definitions there -- a plain extern
@@ -67,6 +71,30 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va);
 
 /* Translate Xbox VA to native pointer (NULL-safe: 0 → NULL) */
 #define XBOX_TO_NATIVE(va) ((va) ? (void*)((uintptr_t)(va) + g_xbox_mem_offset) : NULL)
+
+/* Optional bounded event history for diagnosing missed guest notifications. */
+static volatile LONG s_event_trace_index;
+static struct {DWORD tid; ULONGLONG time; uint32_t kind,state,esp,caller;} s_event_trace[64];
+void xbox_DebugEventTrace(uint32_t object,uint32_t kind)
+{
+    static uint32_t target;static int initialized;
+    if(!initialized){const char *e=getenv("RECOMP_EVENT_TRACE");target=e?(uint32_t)strtoul(e,NULL,0):0;initialized=1;}
+    if(!target || object!=target)return;
+    unsigned i=(unsigned)InterlockedIncrement(&s_event_trace_index)-1;
+    i&=63;s_event_trace[i].tid=GetCurrentThreadId();s_event_trace[i].time=GetTickCount64();
+    s_event_trace[i].kind=kind;s_event_trace[i].state=BRIDGE_MEM32(object+4);
+    s_event_trace[i].esp=g_esp;s_event_trace[i].caller=g_esp?BRIDGE_MEM32(g_esp):0;
+}
+void xbox_DumpEventTrace(void)
+{
+    unsigned end=(unsigned)InterlockedCompareExchange(&s_event_trace_index,0,0);
+    for(unsigned n=end>64?end-64:0;n<end;n++) {
+        unsigned i=n&63;
+        fprintf(stderr,"  [EVENT HISTORY] %llu tid=%lu kind=%u state=%u esp=%08X caller=%08X\n",
+                s_event_trace[i].time,s_event_trace[i].tid,s_event_trace[i].kind,
+                s_event_trace[i].state,s_event_trace[i].esp,s_event_trace[i].caller);
+    }
+}
 
 /* ── Guest buffers the host is about to touch ───────────
  *
@@ -514,7 +542,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
 }
 
 static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
-                                  uint32_t ctx2, uint32_t stack_top)
+                                  uint32_t ctx2, uint32_t stack_top, int suspended)
 {
     struct bridge_thread_start *s = malloc(sizeof(*s));
     HANDLE th;
@@ -522,7 +550,7 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
     if (!s) return NULL;
     s->fn = fn; s->ctx1 = ctx1; s->ctx2 = ctx2; s->stack_top = stack_top;
 
-    th = CreateThread(NULL, 0, bridge_thread_main, s, 0, NULL);
+    th = CreateThread(NULL, 0, bridge_thread_main, s, suspended ? CREATE_SUSPENDED : 0, NULL);
     if (!th) free(s);
     /* Record the game thread so a host-tick-driven title's watchdog can sample
      * it via xbox_thread_debug_handle. Harmless for default-model titles: they
@@ -552,14 +580,15 @@ static void bridge_PsCreateSystemThreadEx(void)
     uint32_t start_context1  = STACK_ARG(5);
     uint32_t start_context2  = STACK_ARG(6);
     uint32_t start_routine   = STACK_ARG(9);
+    uint32_t create_suspended = STACK_ARG(7);
     /* In SPAWN mode there is no privileged "first call": every thread is real,
      * so the entry can return. In INLINE mode the first call runs the game. */
     int is_first_call = (g_thread_mode == XBOX_THREAD_MODE_INLINE)
-                        && (g_thread_call_count == 0);
+                        && (g_thread_call_count == 0) && !create_suspended;
     g_thread_call_count++;
 
-    fprintf(stderr, "  [KERNEL] PsCreateSystemThreadEx #%d: routine=0x%08X ctx1=0x%08X ctx2=0x%08X\n",
-            g_thread_call_count, start_routine, start_context1, start_context2);
+    fprintf(stderr, "  [KERNEL] PsCreateSystemThreadEx #%d: routine=0x%08X ctx1=0x%08X ctx2=0x%08X suspended=%u\n",
+            g_thread_call_count, start_routine, start_context1, start_context2, create_suspended);
     fflush(stderr);
 
     /* Write a fake handle to the output pointer */
@@ -615,7 +644,7 @@ static void bridge_PsCreateSystemThreadEx(void)
                 const char *inline_workers = getenv("RECOMP_WORKERS");
                 uint32_t stack_top;
 
-                if (inline_workers && !strcmp(inline_workers, "inline")) {
+                if (!create_suspended && inline_workers && !strcmp(inline_workers, "inline")) {
                     fprintf(stderr, "  [KERNEL] RECOMP_WORKERS=inline: running "
                             "worker 0x%08X on this thread\n", start_routine);
                     fflush(stderr);
@@ -633,7 +662,7 @@ static void bridge_PsCreateSystemThreadEx(void)
                     bridge_run_thread_inline(fn, start_context1, start_context2);
                 } else {
                     HANDLE th = bridge_spawn_thread(fn, start_context1,
-                                                    start_context2, stack_top);
+                                                    start_context2, stack_top, create_suspended != 0);
                     fprintf(stderr, "  [KERNEL] PsCreateSystemThreadEx: spawned "
                             "worker 0x%08X (ctx=0x%08X, stack top 0x%08X)\n",
                             start_routine, start_context1, stack_top);
@@ -1519,6 +1548,7 @@ static void bridge_KeSetEvent(void)
     uint32_t guest_va = STACK_ARG(0);
     uint32_t increment = STACK_ARG(1);
     uint32_t wait = STACK_ARG(2);
+    xbox_DebugEventTrace(guest_va,1);
     HANDLE h;
 
     (void)increment;
@@ -1553,6 +1583,7 @@ static void bridge_KeWaitForSingleObject(void)
     uint32_t wait_mode = STACK_ARG(2);
     uint32_t alertable = STACK_ARG(3);
     uint32_t timeout_ptr = STACK_ARG(4);
+    xbox_DebugEventTrace(object,2);
     HANDLE h;
 
     {   /* An event the title built itself (see ke_guest_event). Its
@@ -1571,6 +1602,7 @@ static void bridge_KeWaitForSingleObject(void)
             g_eax = (uint32_t)xbox_KeWaitForSingleObject(
                 ge, wait_reason, wait_mode,
                 (BOOLEAN)alertable, XBOX_TO_NATIVE(timeout_ptr));
+            xbox_DebugEventTrace(object,3);
             if (g_eax == 0 && type == 1)               /* synchronization: consumed */
                 BRIDGE_MEM32(object + 4) = 0;
             return;
@@ -1597,12 +1629,15 @@ static void bridge_KeWaitForSingleObject(void)
  */
 static void bridge_NtWaitForSingleObject(void)
 {
-    HANDLE   handle      = bridge_resolve_handle(STACK_ARG(0));
+    BridgeHandleLease lease = bridge_acquire_wait_handle(STACK_ARG(0));
+    HANDLE handle = lease.handle;
+    if (!handle) { g_eax = 0xC0000008u; return; }
     uint32_t alertable   = STACK_ARG(1);
     uint32_t timeout_ptr = STACK_ARG(2);
 
     g_eax = (uint32_t)xbox_NtWaitForSingleObject(
         handle, (BOOLEAN)alertable, XBOX_TO_NATIVE(timeout_ptr));
+    bridge_release_wait_handle(lease);
 }
 
 /* ── NtClearEvent (ordinal 186) ──────────────────────────── */
@@ -1650,7 +1685,9 @@ static HANDLE bridge_resolve_handle(uint32_t token);
 
 static void bridge_NtWaitForSingleObjectEx(void)
 {
-    HANDLE   handle      = bridge_resolve_handle(STACK_ARG(0));
+    BridgeHandleLease lease = bridge_acquire_wait_handle(STACK_ARG(0));
+    HANDLE handle = lease.handle;
+    if (!handle) { g_eax = 0xC0000008u; return; }
     uint32_t wait_mode   = STACK_ARG(1);
     uint32_t alertable   = STACK_ARG(2);
     uint32_t timeout_ptr = STACK_ARG(3);
@@ -1666,6 +1703,7 @@ static void bridge_NtWaitForSingleObjectEx(void)
     g_eax = (uint32_t)xbox_NtWaitForSingleObjectEx(
         handle, (KPROCESSOR_MODE)wait_mode, (BOOLEAN)alertable,
         XBOX_TO_NATIVE(timeout_ptr));
+    bridge_release_wait_handle(lease);
 }
 
 /* ── MmQueryAddressProtect (ordinal 179) ─────────────────── */
@@ -1714,14 +1752,22 @@ static void bridge_NtWaitForMultipleObjectsEx(void)
 
     (void)wait_mode;
     HANDLE   handles[MAXIMUM_WAIT_OBJECTS];
+    BridgeHandleLease leases[MAXIMUM_WAIT_OBJECTS];
     uint32_t i;
 
     if (count == 0 || count > MAXIMUM_WAIT_OBJECTS || !handles_va) {
         g_eax = 0xC000000Du;             /* STATUS_INVALID_PARAMETER */
         return;
     }
-    for (i = 0; i < count; i++)
-        handles[i] = bridge_resolve_handle(BRIDGE_MEM32(handles_va + i * 4));
+    for (i = 0; i < count; i++) {
+        leases[i] = bridge_acquire_wait_handle(BRIDGE_MEM32(handles_va + i * 4));
+        handles[i] = leases[i].handle;
+        if (!handles[i]) {
+            while (i) bridge_release_wait_handle(leases[--i]);
+            g_eax = 0xC0000008u;
+            return;
+        }
+    }
 
     {
         static int logged;
@@ -1738,6 +1784,7 @@ static void bridge_NtWaitForMultipleObjectsEx(void)
     g_eax = (uint32_t)xbox_NtWaitForMultipleObjectsEx(
         count, handles, wait_type, (BOOLEAN)alertable,
         XBOX_TO_NATIVE(timeout_ptr));
+    for (i = 0; i < count; ++i) bridge_release_wait_handle(leases[i]);
 }
 
 /*
@@ -2251,6 +2298,53 @@ static int kernel_raise_interrupt(uint32_t vector)
 #define NV2A_PCRTC_INTR_VBLANK (1u << 0)
 #define NV2A_VECTOR            3u
 
+static volatile LONG g_nv2a_notify_pending;
+static uint32_t g_nv2a_notify_subchannel,g_nv2a_notify_parameter;
+static INIT_ONCE g_nv2a_notify_once=INIT_ONCE_STATIC_INIT;
+static HANDLE g_nv2a_notify_wake,g_nv2a_notify_done;
+static BOOL CALLBACK kernel_nv2a_notify_init(PINIT_ONCE once,PVOID param,PVOID *context)
+{
+    (void)once;(void)param;(void)context;
+    g_nv2a_notify_wake=CreateEventA(NULL,FALSE,FALSE,NULL);
+    g_nv2a_notify_done=CreateEventA(NULL,FALSE,FALSE,NULL);
+    return g_nv2a_notify_wake && g_nv2a_notify_done;
+}
+int xbox_Nv2aSoftwareNotify(uint32_t subchannel,uint32_t parameter)
+{
+    if(!getenv("RECOMP_NV2A_NOTIFY") || !xbox_GetConnectedInterrupt(NV2A_VECTOR))return 0;
+    if(!InitOnceExecuteOnce(&g_nv2a_notify_once,kernel_nv2a_notify_init,NULL,NULL))return 0;
+    g_nv2a_notify_subchannel=subchannel;g_nv2a_notify_parameter=parameter;
+    InterlockedExchange(&g_nv2a_notify_pending,1);
+    /* The FIFO pauses until the timer thread has serviced the trapped method.
+     * That thread owns the guest stack needed by the original ISR and DPC. */
+    SetEvent(g_nv2a_notify_wake);
+    WaitForSingleObject(g_nv2a_notify_done,INFINITE);
+    return 1;
+}
+static void kernel_nv2a_notify_tick(void)
+{
+    if(!InterlockedCompareExchange(&g_nv2a_notify_pending,0,0))return;
+    if(InterlockedCompareExchange(&g_nv2a_notify_pending,0,0)==1) {
+        BRIDGE_MEM32(XBOX_NV2A_REG_BASE+0x400704)=0x100u | ((g_nv2a_notify_subchannel&7u)<<16);
+        BRIDGE_MEM32(XBOX_NV2A_REG_BASE+0x400708)=g_nv2a_notify_parameter;
+        BRIDGE_MEM32(XBOX_NV2A_REG_BASE+0x400108)=1u;
+        xbox_Nv2aRaiseInterruptBits(0x400100,1u<<20);
+        xbox_Nv2aRaiseInterruptBits(0x100,1u<<12);
+        InterlockedExchange(&g_nv2a_notify_pending,2);
+    }
+    int claimed=kernel_raise_interrupt(NV2A_VECTOR);
+    static unsigned shown;
+    if(shown++<12)fprintf(stderr,"  [NV2A] software method %u -> ISR %d\n",g_nv2a_notify_parameter,claimed);
+}
+static void kernel_nv2a_notify_complete(void)
+{
+    if(InterlockedCompareExchange(&g_nv2a_notify_pending,0,0)==2 &&
+       !(BRIDGE_MEM32(XBOX_NV2A_REG_BASE+0x400100)&(1u<<20))) {
+        InterlockedExchange(&g_nv2a_notify_pending,0);
+        SetEvent(g_nv2a_notify_done);
+    }
+}
+
 static void kernel_vblank_tick(void)
 {
     static int enabled = -1;
@@ -2270,8 +2364,8 @@ static void kernel_vblank_tick(void)
     if (!xbox_GetConnectedInterrupt(NV2A_VECTOR))
         return;
 
-    BRIDGE_MEM32(XBOX_NV2A_REG_BASE + NV2A_PCRTC_INTR_0) |= NV2A_PCRTC_INTR_VBLANK;
-    BRIDGE_MEM32(XBOX_NV2A_REG_BASE + NV2A_PMC_INTR_0)   |= NV2A_PMC_INTR_PCRTC;
+    xbox_Nv2aRaiseInterruptBits(NV2A_PCRTC_INTR_0,NV2A_PCRTC_INTR_VBLANK);
+    xbox_Nv2aRaiseInterruptBits(NV2A_PMC_INTR_0,NV2A_PMC_INTR_PCRTC);
 
     {
         static unsigned n;
@@ -2570,9 +2664,14 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
         long long now;
         int i;
 
-        Sleep(10);
+        if(getenv("RECOMP_NV2A_NOTIFY") &&
+           InitOnceExecuteOnce(&g_nv2a_notify_once,kernel_nv2a_notify_init,NULL,NULL))
+            WaitForSingleObject(g_nv2a_notify_wake,10);
+        else Sleep(10);
         kernel_vblank_tick();  /* the GPU's frame clock */
+        kernel_nv2a_notify_tick();
         kernel_drain_dpcs();   /* deferred work, before due timers */
+        kernel_nv2a_notify_complete();
         now = (long long)GetTickCount64();
 
         for (i = 0; i < XBOX_MAX_TIMERS; i++) {
@@ -2805,24 +2904,12 @@ static void bridge_write_iostatus(uint32_t ios_va, NTSTATUS status, uint32_t inf
  * Xbox memory. Tokens carry a tag in the high byte so they never collide
  * with the synthetic handles (0xDEAD0001 / 0xBEEF0010) used elsewhere.
  */
-#define BRIDGE_HANDLE_TAG  0x48000000u
-#define BRIDGE_HANDLE_MASK 0x00FFFFFFu
-#define BRIDGE_HANDLE_MAX  16384
-static HANDLE s_handle_table[BRIDGE_HANDLE_MAX];
-
 static uint32_t bridge_handle_token(HANDLE h)
 {
-    int i;
-    if (!h || h == INVALID_HANDLE_VALUE) return 0;
-    for (i = 1; i < BRIDGE_HANDLE_MAX; i++)
-        if (s_handle_table[i] == h) return BRIDGE_HANDLE_TAG | (uint32_t)i;
-    for (i = 1; i < BRIDGE_HANDLE_MAX; i++)
-        if (s_handle_table[i] == NULL) {
-            s_handle_table[i] = h;
-            return BRIDGE_HANDLE_TAG | (uint32_t)i;
-        }
-    fprintf(stderr, "  [BRIDGE] handle table full\n");
-    return 0;
+    uint32_t token = bridge_handles_register(&s_guest_handles, h);
+    if (h && h != INVALID_HANDLE_VALUE && !token)
+        fprintf(stderr, "  [BRIDGE] handle table full\n");
+    return token;
 }
 
 /* Store a native HANDLE into a 32-bit Xbox memory slot (as a token). */
@@ -2837,8 +2924,7 @@ static HANDLE bridge_read_handle(uint32_t va)
 {
     uint32_t token = BRIDGE_MEM32(va);
     if ((token & 0xFF000000u) == BRIDGE_HANDLE_TAG) {
-        uint32_t i = token & BRIDGE_HANDLE_MASK;
-        return (i > 0 && i < BRIDGE_HANDLE_MAX) ? s_handle_table[i] : NULL;
+        return bridge_handles_resolve(&s_guest_handles, token);
     }
     /* Untagged value: synthetic/dummy handle -- pass through unchanged. */
     return (HANDLE)(uintptr_t)token;
@@ -2860,8 +2946,7 @@ static HANDLE bridge_read_handle(uint32_t va)
 static HANDLE bridge_resolve_handle(uint32_t token)
 {
     if ((token & 0xFF000000u) == BRIDGE_HANDLE_TAG) {
-        uint32_t i = token & BRIDGE_HANDLE_MASK;
-        return (i > 0 && i < BRIDGE_HANDLE_MAX) ? s_handle_table[i] : NULL;
+        return bridge_handles_resolve(&s_guest_handles, token);
     }
     /* Pseudo-handles (NtCurrentProcess() = -1, NtCurrentThread() = -2) are
      * negative. Zero-extending them on a 64-bit host yields 0x00000000FFFFFFFE,
@@ -2875,15 +2960,38 @@ static HANDLE bridge_resolve_handle(uint32_t token)
 
 static HANDLE bridge_take_handle(uint32_t token)
 {
-    if ((token & 0xFF000000u) == BRIDGE_HANDLE_TAG) {
-        uint32_t i = token & BRIDGE_HANDLE_MASK;
-        if (i > 0 && i < BRIDGE_HANDLE_MAX) {
-            HANDLE h = s_handle_table[i];
-            s_handle_table[i] = NULL;
-            return h;
-        }
+    return bridge_handles_close(&s_guest_handles, token);
+}
+
+static BridgeHandleLease bridge_acquire_wait_handle(uint32_t token)
+{
+    BridgeHandleLease lease = { NULL, 0 };
+    if ((token & 0xFF000000u) == BRIDGE_HANDLE_TAG)
+        lease = bridge_handles_acquire(&s_guest_handles, token);
+    else
+        lease.handle = bridge_resolve_handle(token);
+    if (lease.handle && !lease.index && token < 0xFFFFFFF0u) {
+        fprintf(stderr, "  [BRIDGE] wait untagged token=0x%08X handle=%p caller=0x%08X\n",
+                token, lease.handle, g_xbox_kernel_caller);
+        fflush(stderr);
     }
-    return NULL;   /* untagged -> not a table handle, do not close */
+    if (!lease.handle) {
+        fprintf(stderr, "  [BRIDGE] wait invalid token=0x%08X caller=0x%08X esp=0x%08X\n",
+                token, g_xbox_kernel_caller, g_esp);
+        fflush(stderr);
+    }
+    return lease;
+}
+
+static void bridge_release_wait_handle(BridgeHandleLease lease)
+{
+    HANDLE h = bridge_handles_release(&s_guest_handles, lease);
+    if (h && h != INVALID_HANDLE_VALUE) {
+#ifdef _WIN32
+        xbox_dir_context_drop(h);
+#endif
+        CloseHandle(h);
+    }
 }
 
 /* Build a native OBJECT_ATTRIBUTES wrapping the translated Xbox path. */
@@ -3429,6 +3537,15 @@ static void bridge_NtReadFile(void)
      * say whether the bytes were wrong or the read was, and the two look
      * identical from inside the title -- the first bytes settle it. */
     {
+        static LONG read_trace_count;
+        static int read_trace_all = -1;
+        LONG trace_index = InterlockedIncrement(&read_trace_count);
+        if (read_trace_all < 0) {
+            const char *trace = getenv("RECOMP_FILE_READ_TRACE");
+            read_trace_all = trace && trace[0] == '1';
+        }
+        if (read_trace_all || trace_index <= 32 ||
+            (trace_index & 1023) == 0 || !NT_SUCCESS(ios.Status)) {
         const uint8_t *p = (const uint8_t *)XBOX_TO_NATIVE(buffer_va);
         uint32_t got = (uint32_t)ios.Information;
         /* The offset matters as much as the length. A title streaming a pack
@@ -3450,6 +3567,7 @@ static void bridge_NtReadFile(void)
                     got > 0 ? p[0] : 0, got > 1 ? p[1] : 0,
                     got > 2 ? p[2] : 0, got > 3 ? p[3] : 0);
         fflush(stderr);
+        }
     }
     bridge_write_iostatus(iostatus, ios.Status, (uint32_t)ios.Information);
     bridge_complete_file_io(STACK_ARG(1), STACK_ARG(2), STACK_ARG(3),
@@ -7819,7 +7937,7 @@ static void bridge_PsCreateSystemThread(void)
                     bridge_run_thread_inline(fn, start_context1, start_context2);
                 } else {
                     HANDLE th = bridge_spawn_thread(fn, start_context1,
-                                                    start_context2, stack_top);
+                                                    start_context2, stack_top, 0);
                     if (xbox_handle_ptr && th)
                         bridge_write_handle(xbox_handle_ptr, th);
                 }

@@ -3,18 +3,20 @@
  *
  * The title renders into its own framebuffer in guest RAM and tells the kernel
  * where it is through AvSetDisplayMode; on hardware the CRTC scans that memory
- * out. Nothing here scans anything out, so however much of the GPU is
- * implemented, none of it is observable. This is the other half: a window that
- * reads that memory and puts it on screen.
+ * out. This window displays the completed frame supplied by the pushbuffer
+ * executor and also owns keyboard, focus and window-close handling.
  *
- * Deliberately plain GDI rather than the D3D8 layer. The point is to display
- * whatever the guest actually wrote, so the fewer stages between guest memory
- * and the screen the better -- and it must keep working while the D3D8 layer
- * is busy with something else, such as the FMV player's own window.
+ * The default GDI path displays coherent guest-memory copies independently of
+ * the D3D8 layer. With RECOMP_HW_PRESENT, the executor can use its D3D11 device
+ * and fb_gpu_present.c to present GPU textures or completed CPU pixels into
+ * this same window. The message thread acknowledges its last GDI operation
+ * before GPU presentation starts, then continues handling input and messages.
  *
  * Off unless RECOMP_FB_WINDOW is set.
  */
 #include <stdint.h>
+#include <stddef.h>
+#include "fb_gpu_present.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -25,6 +27,10 @@
 extern ptrdiff_t xbox_GetMemoryOffset(void);
 
 static volatile LONG s_fb_running;
+static void *volatile s_fb_window;
+/* 0: GDI, 1: renderer requested GPU mode, 2: window acknowledged after its
+ * final GDI blit. Only the window thread promotes 1 to 2. */
+static volatile LONG s_gpu_present_mode;
 static uint32_t      s_fb_va, s_fb_pitch, s_fb_width = 640, s_fb_height = 480;
 static uint32_t     *s_rgb;           /* converted 32-bit copy for GDI */
 
@@ -41,6 +47,29 @@ static uint32_t     *s_rgb;           /* converted 32-bit copy for GDI */
  * thread is never reading the one being filled. */
 static uint32_t     *s_present[2];
 static volatile LONG s_present_idx = -1;   /* -1 until the first flip */
+
+void *xbox_FramebufferWindowHandle(void)
+{
+    return InterlockedCompareExchangePointer(&s_fb_window, NULL, NULL);
+}
+
+int xbox_FramebufferWindowGpuRequest(int enable)
+{
+    if (!enable) {
+        InterlockedExchange(&s_gpu_present_mode, 0);
+        return 1;
+    }
+    if (!InterlockedCompareExchange(&s_fb_running, 0, 0) || getenv("RECOMP_FB_VA"))
+        return 0;
+    InterlockedCompareExchange(&s_gpu_present_mode, 1, 0);
+    return InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) == 2 &&
+           xbox_FramebufferWindowHandle() != NULL;
+}
+
+int xbox_FramebufferWindowGpuActive(void)
+{
+    return InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) == 2;
+}
 
 void xbox_FramebufferWindowSet(uint32_t fb_va, uint32_t pitch)
 {
@@ -63,6 +92,8 @@ void xbox_FramebufferWindowPresent(uint32_t fb_va, uint32_t pitch)
     uint32_t bpp, x, y;
 
     if (!s_fb_running || !fb_va || !pitch)
+        return;
+    if (xbox_FramebufferWindowGpuActive())
         return;
     if (getenv("RECOMP_FB_VA"))
         return;                       /* pinned: leave the old path alone */
@@ -146,6 +177,7 @@ static LRESULT CALLBACK fb_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
     case WM_CLOSE:
     case WM_DESTROY:
         InterlockedExchange(&s_fb_running, 0);
+        InterlockedExchangePointer(&s_fb_window, NULL);
         return 0;
 
     case WM_KEYDOWN:
@@ -224,7 +256,9 @@ int xbox_FramebufferDumpBmp(const char *path)
     uint32_t img = row * s_fb_height, total = 54u + img, y, x;
     uint8_t hdr[54], *line;
 
-    if (!s_rgb || !s_fb_va)
+    /* GPU frames are captured by the executor's synchronized flip capture.
+     * The window thread must not claim its stale GDI pixels are that frame. */
+    if (!s_rgb || !s_fb_va || xbox_FramebufferWindowGpuActive())
         return -1;
     f = fopen(path, "wb");
     if (!f)
@@ -285,6 +319,11 @@ static DWORD WINAPI fb_thread(LPVOID unused)
         InterlockedExchange(&s_fb_running, 0);
         return 0;
     }
+    /* A hidden diagnostic console must not hide the explicitly requested
+     * game window through the process's STARTUPINFO show flag. */
+    SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+    InterlockedExchangePointer(&s_fb_window, hwnd);
     hdc = GetDC(hwnd);
 
     memset(&bi, 0, sizeof(bi));
@@ -306,7 +345,14 @@ static DWORD WINAPI fb_thread(LPVOID unused)
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
-        if (s_present_idx >= 0 && s_rgb) {
+        if (!InterlockedCompareExchange(&s_fb_running, 0, 0))
+            break;
+        /* Acknowledge only here, after any preceding iteration's GDI call has
+         * returned. The GPU thread never waits while holding a graphics lock;
+         * it retries at a later flip until this nonblocking handoff completes. */
+        InterlockedCompareExchange(&s_gpu_present_mode, 2, 1);
+        if (!InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) &&
+            s_present_idx >= 0 && s_rgb) {
             /* A finished frame, published by the flip. Copied into s_rgb so
              * the dump path and GDI see one consistent image even if the
              * next flip lands mid-blit. */
@@ -317,7 +363,8 @@ static DWORD WINAPI fb_thread(LPVOID unused)
             StretchDIBits(hdc, 0, 0, (int)s_fb_width, (int)s_fb_height,
                           0, 0, (int)s_fb_width, (int)s_fb_height,
                           s_rgb, &bi, DIB_RGB_COLORS, SRCCOPY);
-        } else if (s_fb_va && s_fb_pitch && s_rgb) {
+        } else if (!InterlockedCompareExchange(&s_gpu_present_mode, 0, 0) &&
+                   s_fb_va && s_fb_pitch && s_rgb) {
             /* No flip yet, or pinned with RECOMP_FB_VA: read guest memory as
              * before, which is also what a title that never flips needs. */
             const uint8_t *src =
@@ -370,6 +417,8 @@ static DWORD WINAPI fb_thread(LPVOID unused)
 
     ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
+    InterlockedExchangePointer(&s_fb_window, NULL);
+    InterlockedExchange(&s_gpu_present_mode, 0);
     free(s_rgb);
     s_rgb = NULL;
     return 0;
@@ -391,6 +440,9 @@ void xbox_FramebufferWindowStart(void)
 }
 
 #else
+void *xbox_FramebufferWindowHandle(void) { return NULL; }
+int xbox_FramebufferWindowGpuRequest(int enable) { (void)enable; return 0; }
+int xbox_FramebufferWindowGpuActive(void) { return 0; }
 void xbox_FramebufferWindowSet(uint32_t fb_va, uint32_t pitch) { (void)fb_va; (void)pitch; }
 void xbox_FramebufferWindowPresent(uint32_t fb_va, uint32_t pitch) { (void)fb_va; (void)pitch; }
 void xbox_FramebufferWindowStart(void) {}

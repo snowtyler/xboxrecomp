@@ -36,6 +36,12 @@ typedef struct {
     float fog[4];
     float tex[4][4];
 } Nv2aVshOutput;
+typedef struct {
+    uint32_t count, context_write;
+    uint32_t words[NV2A_VSH_SLOTS][4];
+    float constants[NV2A_VSH_CONSTANTS][4];
+} Nv2aVshSnapshot;
+int nv2a_vsh_snapshot(Nv2aVshSnapshot *out);
 
 void nv2a_vsh_set_load_slot(uint32_t slot);           /* _PROGRAM_LOAD      */
 void nv2a_vsh_program_word(uint32_t word);            /* _PROGRAM(i)        */
@@ -49,10 +55,13 @@ void nv2a_vsh_set_cxt_write(uint32_t enable);         /* _CXT_WRITE_EN      */
  * FINAL flag within program memory), which the caller treats as "cannot
  * transform this batch" rather than drawing garbage. */
 int  nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out);
+/* Repeated indices can reuse outputs only if execution cannot write constants. */
+int nv2a_vsh_cacheable(void);
 
 /* Direct access, for the self-test. */
 void nv2a_vsh_set_constant(uint32_t index, const float v[4]);
 const float *nv2a_vsh_constant(uint32_t index);   /* for traces */
+void nv2a_vsh_dump_current(void);               /* explicit frame diagnostic */
 /* One component of a constant, raw bits: the viewport methods write c[58]
  * (scale) and c[59] (offset) a word at a time rather than via _CONSTANT. */
 void nv2a_vsh_constant_component(uint32_t index, uint32_t comp, uint32_t word);

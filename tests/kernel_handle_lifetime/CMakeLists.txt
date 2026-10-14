@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(kernel_handle_lifetime C)
+add_executable(kernel-handle-lifetime-test handle_test.c)
+target_compile_options(kernel-handle-lifetime-test PRIVATE /UNDEBUG)
+enable_testing()
+add_test(NAME kernel-handle-lifetime COMMAND kernel-handle-lifetime-test)

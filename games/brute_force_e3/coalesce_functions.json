@@ -1,0 +1,447 @@
+[
+  {
+    "start": "0x000FD780",
+    "end": "0x000FDA90",
+    "coalesce_starts": [
+      "0x000FD96D"
+    ]
+  },
+  {
+    "start": "0x000FE980",
+    "end": "0x000FEAA4",
+    "coalesce_starts": [
+      "0x000FE9DF"
+    ]
+  },
+  {
+    "start": "0x000FFF70",
+    "end": "0x001001BC",
+    "coalesce_starts": [
+      "0x000FFFFF",
+      "0x00100008",
+      "0x0010000C",
+      "0x00100014",
+      "0x00100043",
+      "0x00100045",
+      "0x00100047",
+      "0x00100049",
+      "0x0010004B",
+      "0x0010004C",
+      "0x00100051",
+      "0x00100052",
+      "0x00100054",
+      "0x00100059",
+      "0x00100080",
+      "0x001000C0",
+      "0x001000C2",
+      "0x001000C8",
+      "0x001000CB",
+      "0x001000CD",
+      "0x001000CE",
+      "0x001000D4",
+      "0x001000D5",
+      "0x001000D8",
+      "0x001000DB"
+    ]
+  },
+  {
+    "start": "0x0017EB40",
+    "end": "0x0017EBAF",
+    "coalesce_starts": [
+      "0x0017EBA0"
+    ]
+  },
+  {
+    "start": "0x00222310",
+    "end": "0x00222401",
+    "coalesce_starts": [
+      "0x002223F1"
+    ]
+  },
+  {
+    "start": "0x000642E0",
+    "end": "0x0006430D",
+    "coalesce_starts": [
+      "0x00064305"
+    ]
+  },
+  {
+    "start": "0x00064310",
+    "end": "0x00064398",
+    "coalesce_starts": [
+      "0x00064390"
+    ]
+  },
+  {
+    "start": "0x000643A0",
+    "end": "0x0006446E",
+    "coalesce_starts": [
+      "0x00064466"
+    ]
+  },
+  {
+    "start": "0x00064470",
+    "end": "0x0006449A",
+    "coalesce_starts": [
+      "0x00064492"
+    ]
+  },
+  {
+    "start": "0x000644A0",
+    "end": "0x000644CA",
+    "coalesce_starts": [
+      "0x000644C2"
+    ]
+  },
+  {
+    "start": "0x000644D0",
+    "end": "0x000644FA",
+    "coalesce_starts": [
+      "0x000644F2"
+    ]
+  },
+  {
+    "start": "0x00064730",
+    "end": "0x0006475A",
+    "coalesce_starts": [
+      "0x00064752"
+    ]
+  },
+  {
+    "start": "0x00064950",
+    "end": "0x0006499D",
+    "coalesce_starts": [
+      "0x00064995"
+    ]
+  },
+  {
+    "start": "0x000649A0",
+    "end": "0x000649F1",
+    "coalesce_starts": [
+      "0x000649E9"
+    ]
+  },
+  {
+    "start": "0x00064A00",
+    "end": "0x00064A48",
+    "coalesce_starts": [
+      "0x00064A40"
+    ]
+  },
+  {
+    "start": "0x00065350",
+    "end": "0x00065374",
+    "coalesce_starts": [
+      "0x0006536C"
+    ]
+  },
+  {
+    "start": "0x00065380",
+    "end": "0x000653A4",
+    "coalesce_starts": [
+      "0x0006539C"
+    ]
+  },
+  {
+    "start": "0x000653B0",
+    "end": "0x000653D2",
+    "coalesce_starts": [
+      "0x000653CA"
+    ]
+  },
+  {
+    "start": "0x00065470",
+    "end": "0x00065494",
+    "coalesce_starts": [
+      "0x0006548C"
+    ]
+  },
+  {
+    "start": "0x000655A0",
+    "end": "0x000655DE",
+    "coalesce_starts": [
+      "0x000655D6"
+    ]
+  },
+  {
+    "start": "0x0006B3D0",
+    "end": "0x0006B3F7",
+    "coalesce_starts": [
+      "0x0006B3EF"
+    ]
+  },
+  {
+    "start": "0x0006B400",
+    "end": "0x0006B437",
+    "coalesce_starts": [
+      "0x0006B42F"
+    ]
+  },
+  {
+    "start": "0x0006C370",
+    "end": "0x0006C39A",
+    "coalesce_starts": [
+      "0x0006C392"
+    ]
+  },
+  {
+    "start": "0x0006C3A0",
+    "end": "0x0006C3DE",
+    "coalesce_starts": [
+      "0x0006C3D6"
+    ]
+  },
+  {
+    "start": "0x0006C3E0",
+    "end": "0x0006C402",
+    "coalesce_starts": [
+      "0x0006C3FA"
+    ]
+  },
+  {
+    "start": "0x0006C410",
+    "end": "0x0006C450",
+    "coalesce_starts": [
+      "0x0006C448"
+    ]
+  },
+  {
+    "start": "0x0006CE80",
+    "end": "0x0006CEBD",
+    "coalesce_starts": [
+      "0x0006CEB5"
+    ]
+  },
+  {
+    "start": "0x0006DD00",
+    "end": "0x0006DD2D",
+    "coalesce_starts": [
+      "0x0006DD25"
+    ]
+  },
+  {
+    "start": "0x0006DD30",
+    "end": "0x0006DDF3",
+    "coalesce_starts": [
+      "0x0006DDEB"
+    ]
+  },
+  {
+    "start": "0x0006DE00",
+    "end": "0x0006DF26",
+    "coalesce_starts": [
+      "0x0006DF1E"
+    ]
+  },
+  {
+    "start": "0x0006DF30",
+    "end": "0x0006DF5A",
+    "coalesce_starts": [
+      "0x0006DF52"
+    ]
+  },
+  {
+    "start": "0x0006DF60",
+    "end": "0x0006DF8A",
+    "coalesce_starts": [
+      "0x0006DF82"
+    ]
+  },
+  {
+    "start": "0x0006DF90",
+    "end": "0x0006DFBA",
+    "coalesce_starts": [
+      "0x0006DFB2"
+    ]
+  },
+  {
+    "start": "0x0006E000",
+    "end": "0x0006E04D",
+    "coalesce_starts": [
+      "0x0006E045"
+    ]
+  },
+  {
+    "start": "0x0006E050",
+    "end": "0x0006E098",
+    "coalesce_starts": [
+      "0x0006E090"
+    ]
+  },
+  {
+    "start": "0x0006E6F0",
+    "end": "0x0006E7B3",
+    "coalesce_starts": [
+      "0x0006E7AB"
+    ]
+  },
+  {
+    "start": "0x0006E7C0",
+    "end": "0x0006E8E0",
+    "coalesce_starts": [
+      "0x0006E8D8"
+    ]
+  },
+  {
+    "start": "0x0006E920",
+    "end": "0x0006E971",
+    "coalesce_starts": [
+      "0x0006E969"
+    ]
+  },
+  {
+    "start": "0x00093B20",
+    "end": "0x00093B6F",
+    "coalesce_starts": [
+      "0x00093B2F"
+    ]
+  },
+  {
+    "start": "0x000D60C0",
+    "end": "0x000D6119",
+    "coalesce_starts": [
+      "0x000D6113"
+    ]
+  },
+  {
+    "start": "0x00107E40",
+    "end": "0x00107E5C",
+    "coalesce_starts": [
+      "0x00107E54"
+    ]
+  },
+  {
+    "start": "0x001471C0",
+    "end": "0x001471E5",
+    "coalesce_starts": [
+      "0x001471E0"
+    ]
+  },
+  {
+    "start": "0x00148A70",
+    "end": "0x00148A8E",
+    "coalesce_starts": [
+      "0x00148A89"
+    ]
+  },
+  {
+    "start": "0x00148D60",
+    "end": "0x00148D99",
+    "coalesce_starts": [
+      "0x00148D94"
+    ]
+  },
+  {
+    "start": "0x0021B190",
+    "end": "0x0021B1B9",
+    "coalesce_starts": [
+      "0x0021B1B4"
+    ]
+  },
+  {
+    "start": "0x0022AF60",
+    "end": "0x0022AFB2",
+    "coalesce_starts": [
+      "0x0022AFA3"
+    ]
+  },
+  {
+    "start": "0x002E4E40",
+    "end": "0x002E4EF9",
+    "coalesce_starts": [
+      "0x002E4EBE"
+    ]
+  },
+  {
+    "start": "0x0031A840",
+    "end": "0x0031A8AF",
+    "coalesce_starts": [
+      "0x0031A870"
+    ]
+  },
+  {
+    "start": "0x000A07E0",
+    "end": "0x000A0ADA",
+    "coalesce_starts": [
+      "0x000A0A0A"
+    ]
+  },
+  {
+    "start": "0x00062FD0",
+    "end": "0x000630A1",
+    "coalesce_starts": [
+      "0x00062FED"
+    ]
+  },
+  {
+    "start": "0x00113570",
+    "end": "0x00113977",
+    "coalesce_starts": [
+      "0x001135F4",
+      "0x00113648",
+      "0x0011365F",
+      "0x00113682",
+      "0x00113711",
+      "0x00113732",
+      "0x0011376F",
+      "0x001137EB",
+      "0x00113803",
+      "0x0011384E",
+      "0x0011386F",
+      "0x00113925",
+      "0x00113968"
+    ]
+  },
+  {
+    "start": "0x000418E0",
+    "end": "0x000419D5",
+    "coalesce_starts": [
+      "0x0004195C",
+      "0x000419BB"
+    ]
+  },
+  {
+    "start": "0x00041D90",
+    "end": "0x00041F18",
+    "coalesce_starts": [
+      "0x00041E60",
+      "0x00041E68",
+      "0x00041E94"
+    ]
+  },
+  {
+    "start": "0x00100B60",
+    "end": "0x00100BBB",
+    "coalesce_starts": [
+      "0x00100B80"
+    ]
+  },
+  {
+    "start": "0x00105810",
+    "end": "0x00105C63",
+    "coalesce_starts": [
+      "0x0010589D",
+      "0x001058E7",
+      "0x00105971",
+      "0x00105A0B",
+      "0x00105AB7",
+      "0x00105AF3",
+      "0x00105B76",
+      "0x00105C14"
+    ]
+  },
+  {
+    "start": "0x001530D0",
+    "end": "0x00153137",
+    "coalesce_starts": [
+      "0x00153101"
+    ]
+  },
+  {
+    "start": "0x00186390",
+    "end": "0x00186448",
+    "coalesce_starts": [
+      "0x00186401"
+    ]
+  }
+]

@@ -8,6 +8,8 @@
  * in R1; sent to the instruction's temp field instead, R1.x stayed 0 and
  * every vertex came out at c[59]. */
 #include "nv2a_vsh_interp.h"
+#include "nv2a_vertex_cache.h"
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -63,6 +65,47 @@ int main(void)
                o.pos[0], o.pos[1], o.pos[2], o.pos[3]);
         return 1;
     }
+    /* A screen-space shader that leaves W unwritten must remain visible.
+     * Run after a shader that wrote W=2, to also check per-vertex reset. */
+    i0[3] = (0xEu << 12) | (1u << 11) | 1u;
+    nv2a_vsh_set_instruction(0, i0);
+    if (!nv2a_vsh_run((const float (*)[4])in, &o)
+        || o.pos[0] != 1.0f || o.pos[1] != 0.5f
+        || o.pos[2] != 0.25f || o.pos[3] != 1.0f) {
+        puts("FAIL: xyz-only position shader lost default W=1");
+        return 1;
+    }
     puts("ok");
+    /* Outputs writing shared shader constants cannot be reused. */
+    nv2a_vsh_set_cxt_write(1);
+    assert(nv2a_vsh_cacheable());
+    i0[3] = (0xFu << 12) | (22u << 3) | 1u;
+    nv2a_vsh_set_instruction(0, i0);
+    assert(!nv2a_vsh_cacheable());
+    assert(nv2a_vsh_run((const float (*)[4])in, &o));
+    assert(nv2a_vsh_constant(22)[0] == in[0][0]);
+    nv2a_vsh_set_cxt_write(0);
+    assert(nv2a_vsh_cacheable());
+    /* Index collisions, full-width keys, per-batch invalidation, rollover,
+     * and a full table must preserve the first output association. */
+    static Nv2aVertexCache cache;
+    uint32_t previous, key;
+    nv2a_vertex_cache_begin(&cache);
+    assert(!nv2a_vertex_cache_lookup(&cache, 1, 0, &previous));
+    assert(!nv2a_vertex_cache_lookup(&cache, 0x10001, 1, &previous));
+    assert(nv2a_vertex_cache_lookup(&cache, 1, 2, &previous) && previous == 0);
+    assert(nv2a_vertex_cache_lookup(&cache, 0x10001, 3, &previous) && previous == 1);
+    assert(!nv2a_vertex_cache_lookup(&cache, UINT32_MAX, 4, &previous));
+    assert(nv2a_vertex_cache_lookup(&cache, UINT32_MAX, 5, &previous) && previous == 4);
+    nv2a_vertex_cache_begin(&cache);
+    for (key = 0; key < NV2A_VERTEX_CACHE_SIZE; ++key)
+        assert(!nv2a_vertex_cache_lookup(&cache, key, key, &previous));
+    assert(!nv2a_vertex_cache_lookup(&cache, NV2A_VERTEX_CACHE_SIZE, 0, &previous));
+    assert(nv2a_vertex_cache_lookup(&cache, 32768, 0, &previous) && previous == 32768);
+    cache.epoch = UINT32_MAX;
+    nv2a_vertex_cache_begin(&cache);
+    assert(!nv2a_vertex_cache_lookup(&cache, 1, 42, &previous));
+    assert(nv2a_vertex_cache_lookup(&cache, 1, 43, &previous) && previous == 42);
+    puts("Vertex reuse and context-write guard passed");
     return 0;
 }

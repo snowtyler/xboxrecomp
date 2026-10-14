@@ -15,6 +15,9 @@
 #include "xbox_memory_layout.h"
 #include "kernel.h"
 #include "guest_vmem.h"
+#include "nv2a_hw_raster.h"
+#include "../video/fb_gpu_present.h"
+#include "../platform/mmio_decode.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -197,6 +200,131 @@ static const struct { uint32_t offset; uint32_t busy_mask; } NV2A_ACK[] = {
     { 0x400100, 0xFFFFFFFFu },  /* PGRAPH_INTR   */
     { 0x600100, 0xFFFFFFFFu },  /* PCRTC_INTR_0  */
 };
+
+/* PFB flush reads complete immediately against coherent host RAM. Keep
+ * its register file separate from the protected aperture: every access is
+ * decoded without opening a writable window for another guest thread. */
+static void *g_pfb_page, *g_pfb_veh;
+__declspec(align(8)) static unsigned char g_pfb_registers[4096];
+static uint64_t pfb_read(void *dev,uint32_t off,int size)
+{
+    (void)dev;uint64_t value=0;
+    if((uint64_t)off+size>sizeof(g_pfb_registers))return 0;
+    for(int i=0;i<size;i++) {
+        uint32_t word=*(volatile uint32_t*)(g_pfb_registers+((off+i)&~3u));
+        value|=(uint64_t)((word>>(((off+i)&3u)*8))&255u)<<(i*8);
+    }
+    return value;
+}
+static void pfb_write(void *dev,uint32_t off,uint64_t value,int size)
+{
+    (void)dev;
+    if((uint64_t)off+size>sizeof(g_pfb_registers))return;
+    if(size==4 && !(off&3)) {
+        uint32_t v=(uint32_t)value;if(off==0x410)v&=~0x10000u;
+        InterlockedExchange((volatile LONG*)(g_pfb_registers+off),(LONG)v);return;
+    }
+    for(int i=0;i<size;i++) {
+        uint32_t base=(off+i)&~3u,shift=((off+i)&3u)*8;
+        volatile LONG *word=(volatile LONG*)(g_pfb_registers+base);
+        LONG old,new_value;
+        do {
+            old=*word;new_value=(LONG)(((uint32_t)old&~(255u<<shift))|(((value>>(i*8))&255u)<<shift));
+            if(base==0x410)new_value&=~0x10000;
+        }while(InterlockedCompareExchange(word,new_value,old)!=old);
+    }
+}
+static LONG CALLBACK pfb_write_veh(PEXCEPTION_POINTERS ep)
+{
+    if(!g_pfb_page || ep->ExceptionRecord->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION)
+        return EXCEPTION_CONTINUE_SEARCH;
+    uintptr_t address=ep->ExceptionRecord->ExceptionInformation[1];
+    if(address<(uintptr_t)g_pfb_page || address>=(uintptr_t)g_pfb_page+0x1000)
+        return EXCEPTION_CONTINUE_SEARCH;
+    if(mmio_emulate(ep->ContextRecord,(uint32_t)(address-(uintptr_t)g_pfb_page),NULL,pfb_read,pfb_write))
+        return EXCEPTION_CONTINUE_EXECUTION;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+static void pfb_arm_write_trap(void)
+{
+    DWORD old;
+    if(!g_nv2a_memory || g_pfb_page || getenv("RECOMP_NV2A_PFB_POLL"))return;
+    g_pfb_page=(char*)g_nv2a_memory+0x100000;
+    memcpy(g_pfb_registers,g_pfb_page,sizeof(g_pfb_registers));
+    *(uint32_t*)(g_pfb_registers+0x410)&=~0x10000u;
+    g_pfb_veh=AddVectoredExceptionHandler(1,pfb_write_veh);
+    if(!g_pfb_veh || !VirtualProtect(g_pfb_page,0x1000,PAGE_NOACCESS,&old)) {
+        if(g_pfb_veh)RemoveVectoredExceptionHandler(g_pfb_veh);
+        g_pfb_page=g_pfb_veh=NULL;return;
+    }
+    fprintf(stderr,"  NV2A PFB: coherent write-combine flush completes on write\n");
+}
+
+/* Interrupt status is write-one-to-clear, including writes made by the
+ * original miniport ISR. Preserve that behavior while delivering software
+ * method notifications. The timer thread uses the setter below to raise bits. */
+static void *g_irq_pages[3], *g_irq_veh;
+static RECOMP_TLS void *s_irq_page;
+static RECOMP_TLS volatile uint32_t *s_irq_status;
+static RECOMP_TLS uint32_t s_irq_old;
+static RECOMP_TLS volatile int s_irq_raise;
+static LONG CALLBACK irq_write_veh(PEXCEPTION_POINTERS ep)
+{
+    DWORD old;
+    if(ep->ExceptionRecord->ExceptionCode==EXCEPTION_SINGLE_STEP && s_irq_page) {
+        if(s_irq_status && !s_irq_raise)*s_irq_status=s_irq_old & ~*s_irq_status;
+        /* PMC reports the interrupt lines from its child blocks; clearing the
+         * final child status bit deasserts the corresponding summary line. */
+        if(s_irq_status && !*s_irq_status && s_irq_page!=g_irq_pages[0]) {
+            DWORD pmc_old;
+            VirtualProtect(g_irq_pages[0],0x1000,PAGE_READWRITE,&pmc_old);
+            *(volatile uint32_t*)((char*)g_irq_pages[0]+0x100)&=
+                ~(s_irq_page==g_irq_pages[1] ? 1u<<12 : 1u<<24);
+            VirtualProtect(g_irq_pages[0],0x1000,pmc_old,&pmc_old);
+        }
+        VirtualProtect(s_irq_page,0x1000,PAGE_READONLY,&old);
+        s_irq_page=NULL;s_irq_status=NULL;
+        ep->ContextRecord->EFlags&=~0x100u;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if(ep->ExceptionRecord->ExceptionCode==EXCEPTION_ACCESS_VIOLATION &&
+       ep->ExceptionRecord->ExceptionInformation[0]==1) {
+        uintptr_t address=ep->ExceptionRecord->ExceptionInformation[1];
+        for(int i=0;i<3;i++)if(g_irq_pages[i] && address>=(uintptr_t)g_irq_pages[i] &&
+           address<(uintptr_t)g_irq_pages[i]+0x1000) {
+            if(!VirtualProtect(g_irq_pages[i],0x1000,PAGE_READWRITE,&old))return EXCEPTION_CONTINUE_SEARCH;
+            s_irq_page=g_irq_pages[i];s_irq_status=NULL;
+            if(address==(uintptr_t)s_irq_page+0x100) {
+                s_irq_status=(volatile uint32_t*)address;s_irq_old=*s_irq_status;
+            }
+            ep->ContextRecord->EFlags|=0x100u;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+void xbox_Nv2aRaiseInterruptBits(uint32_t offset,uint32_t bits)
+{
+    s_irq_raise=1;
+    *(volatile uint32_t*)((char*)g_nv2a_memory+offset)|=bits;
+    s_irq_raise=0;
+}
+void xbox_Nv2aWriteRegister(uint32_t offset,uint32_t value)
+{
+    if(g_nv2a_memory && offset<XBOX_NV2A_SIZE)
+        *(volatile uint32_t*)((char*)g_nv2a_memory+offset)=value;
+}
+static void irq_arm_write_trap(void)
+{
+    const uint32_t offsets[3]={0,0x400000,0x600000};DWORD old;
+    if(!getenv("RECOMP_NV2A_NOTIFY") || g_irq_veh)return;
+    g_irq_veh=AddVectoredExceptionHandler(1,irq_write_veh);
+    if(!g_irq_veh)return;
+    for(int i=0;i<3;i++) {
+        g_irq_pages[i]=(char*)g_nv2a_memory+offsets[i];
+        VirtualProtect(g_irq_pages[i],0x1000,PAGE_READONLY,&old);
+    }
+}
 
 /*
  * Bits that must always read as SET. The mirror image of the table above:
@@ -572,6 +700,69 @@ static struct {
     uint32_t get_ptr_off;
 } g_fence_mirrors[XBOX_MAX_FENCE_MIRRORS];
 static int g_fence_mirror_count = 0;
+static struct {
+    uint32_t context, device_ptr_va, buffer_ptr_off, bytes;
+} g_semaphore_bindings[XBOX_MAX_FENCE_MIRRORS];
+static int g_semaphore_binding_count;
+static RECOMP_TLS unsigned g_fence_batch_depth,g_pending_fence_count,g_fence_batch_failed;
+static RECOMP_TLS struct {uint32_t target,value;} g_pending_fences[64];
+static struct {uint32_t device_ptr_va,low_offset,high_offset;} g_ring_binding;
+void xbox_Nv2aBindRing(uint32_t device_ptr_va,uint32_t low_offset,uint32_t high_offset)
+{g_ring_binding.device_ptr_va=device_ptr_va;g_ring_binding.low_offset=low_offset;g_ring_binding.high_offset=high_offset;}
+void xbox_Nv2aFenceBatchBegin(void)
+{
+    if(!g_fence_batch_depth++) {
+        g_pending_fence_count=0;
+        g_fence_batch_failed=0;
+    }
+}
+int xbox_Nv2aFenceBatchActive(void)
+{
+    return g_fence_batch_depth!=0;
+}
+void xbox_Nv2aFenceBatchFail(void)
+{
+    if(g_fence_batch_depth)g_fence_batch_failed=1;
+}
+int xbox_Nv2aFenceBatchFlush(void)
+{
+    /* Never acknowledge a rejected prefix, including a release-list overflow.
+     * Flushing to make room would let the CPU reuse commands still unread. */
+    if(g_fence_batch_failed)return 0;
+    for(unsigned i=0;i<g_pending_fence_count;i++)
+        *(volatile uint32_t*)((uintptr_t)g_pending_fences[i].target+g_memory_offset)=g_pending_fences[i].value;
+    g_pending_fence_count=0;
+    return 1;
+}
+void xbox_Nv2aFenceBatchEnd(int commit)
+{
+    if(!g_fence_batch_depth)return;
+    if(!commit)g_fence_batch_failed=1;
+    if(--g_fence_batch_depth)return;
+    if(!g_fence_batch_failed)for(unsigned i=0;i<g_pending_fence_count;i++)
+        *(volatile uint32_t*)((uintptr_t)g_pending_fences[i].target+g_memory_offset)=g_pending_fences[i].value;
+    g_pending_fence_count=0;
+    g_fence_batch_failed=0;
+}
+int xbox_Nv2aFenceBatchHasRelease(void)
+{
+    return !g_fence_batch_failed&&g_pending_fence_count!=0;
+}
+
+int xbox_Nv2aBindSemaphore(uint32_t context, uint32_t device_ptr_va,
+                          uint32_t buffer_ptr_off, uint32_t bytes)
+{
+    int i = g_semaphore_binding_count;
+    if (i >= XBOX_MAX_FENCE_MIRRORS || bytes < 4) return -1;
+    g_semaphore_bindings[i].context = context;
+    g_semaphore_bindings[i].device_ptr_va = device_ptr_va;
+    g_semaphore_bindings[i].buffer_ptr_off = buffer_ptr_off;
+    g_semaphore_bindings[i].bytes = bytes;
+    ++g_semaphore_binding_count;
+    fprintf(stderr, "  NV2A semaphore binding: context=%08X device=%08X buffer +%X bytes=%u\n",
+            context, device_ptr_va, buffer_ptr_off, bytes);
+    return 0;
+}
 
 int xbox_Nv2aMirrorFence(uint32_t device_ptr_va,
                          uint32_t put_off, uint32_t get_ptr_off)
@@ -608,6 +799,33 @@ static int fence_readable(uint32_t va, uint32_t bytes)
             && (uint64_t)va + bytes <= (uint64_t)XBOX_CONTIG_BASE + XBOX_CONTIG_SIZE)
         return g_contig_memory != NULL;
     return (size_t)va + bytes <= g_memory_size;
+}
+
+int xbox_Nv2aReleaseSemaphore(uint32_t context, uint32_t offset, uint32_t value)
+{
+    int i;
+    for (i = 0; i < g_semaphore_binding_count; ++i) {
+        uint32_t dev, buffer;
+        uint64_t slot, target;
+        if (g_semaphore_bindings[i].context != context || (offset & 3) ||
+            (uint64_t)offset + 4 > g_semaphore_bindings[i].bytes ||
+            !fence_readable(g_semaphore_bindings[i].device_ptr_va, 4)) continue;
+        dev = *(volatile uint32_t *)((uintptr_t)g_semaphore_bindings[i].device_ptr_va + g_memory_offset);
+        slot = (uint64_t)dev + g_semaphore_bindings[i].buffer_ptr_off;
+        if (slot > UINT32_MAX || !fence_readable((uint32_t)slot, 4)) continue;
+        buffer = *(volatile uint32_t *)((uintptr_t)slot + g_memory_offset);
+        target = (uint64_t)buffer + offset;
+        if (target > UINT32_MAX || !fence_readable((uint32_t)target, 4)) continue;
+        if(g_fence_batch_depth) {
+            unsigned j;
+            for(j=0;j<g_pending_fence_count;j++)if(g_pending_fences[j].target==(uint32_t)target)break;
+            if(j==64){xbox_Nv2aFenceBatchFail();return 0;}
+            if(j==g_pending_fence_count)g_pending_fence_count++;
+            g_pending_fences[j].target=(uint32_t)target;g_pending_fences[j].value=value;
+        } else *(volatile uint32_t *)((uintptr_t)target + g_memory_offset) = value;
+        return 1;
+    }
+    return 0;
 }
 
 /*
@@ -814,6 +1032,7 @@ static void fence_mirrors_tick(void)
 }
 
 static int s_nv2a_trace = 0;
+static int s_nv2a_transfer_trace = 0;
 
 /* The display framebuffer, as reported by AvSetDisplayMode. Checksummed once a
  * second so a run can answer the only question that matters before building a
@@ -878,6 +1097,8 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
     volatile uint32_t *regs = (volatile uint32_t *)param;
     while (!InterlockedCompareExchange(&g_nv2a_ack_stop, 0, 0)) {
         for (size_t i = 0; i < sizeof(NV2A_ACK) / sizeof(NV2A_ACK[0]); i++) {
+            if(g_pfb_page && NV2A_ACK[i].offset==0x100410)continue;
+            if(g_irq_veh && (NV2A_ACK[i].offset==0x100 || NV2A_ACK[i].offset==0x400100 || NV2A_ACK[i].offset==0x600100))continue;
             volatile uint32_t *r =
                 (volatile uint32_t *)((char *)regs + NV2A_ACK[i].offset);
             if (*r & NV2A_ACK[i].busy_mask) {
@@ -904,7 +1125,6 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
          *
          * The advance now happens after the scan, further down, which is
          * also the only ordering that gives the title real back-pressure. */
-        fence_mirrors_tick();
         dsp_ack_tick();
         poke_tick();
         counter_mirrors_tick();
@@ -966,6 +1186,21 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                     static uint32_t put_lo, put_hi;
                     if (!put_lo || put < put_lo) put_lo = put;
                     if (put > put_hi) put_hi = put;
+                    if(g_ring_binding.device_ptr_va&&fence_readable(g_ring_binding.device_ptr_va,4)) {
+                        uint32_t dev=*(volatile uint32_t*)((uintptr_t)g_ring_binding.device_ptr_va+g_memory_offset);
+                        if(fence_readable(dev+g_ring_binding.low_offset,4)&&fence_readable(dev+g_ring_binding.high_offset,4)) {
+                            uint32_t lo=*(volatile uint32_t*)((uintptr_t)(dev+g_ring_binding.low_offset)+g_memory_offset);
+                            uint32_t hi=*(volatile uint32_t*)((uintptr_t)(dev+g_ring_binding.high_offset)+g_memory_offset);
+                            lo&=0x0FFFFFFFu;hi&=0x0FFFFFFFu;
+                            if(lo<hi&&hi<=XBOX_CONTIG_SIZE&&put>=lo&&put<=hi) {
+                                static uint32_t last_low,last_high;
+                                if(lo!=last_low||hi!=last_high){fprintf(stderr,"[PB RING] SDK bounds %08X..%08X observed PUT=%08X\n",lo,hi,put);last_low=lo;last_high=hi;}
+                                put_lo=lo;put_hi=hi;
+                            }
+                        }
+                    }
+                    extern void nv2a_pb_set_ring_bounds(uint32_t,uint32_t);
+                    nv2a_pb_set_ring_bounds(XBOX_CONTIG_BASE|(put_lo&0x0FFFFFFFu),XBOX_CONTIG_BASE|(put_hi&0x0FFFFFFFu));
                     if (last_put && put > last_put) {
                         nv2a_pb_scan(XBOX_CONTIG_BASE | (last_put & 0x0FFFFFFFu),
                                      XBOX_CONTIG_BASE | (put      & 0x0FFFFFFFu));
@@ -1020,16 +1255,20 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                  * in its device struct rather than assuming 0xFD800000, and
                  * mirroring the wrong block leaves it spinning on a GET that
                  * never moves. */
-                if (s_nv2a_trace) {
+                if (s_nv2a_transfer_trace) {
                     uint32_t g = *(volatile uint32_t *)
                                  ((char *)regs + NV2A_USER_DMA_GET);
                     fprintf(stderr, "  [NV2A] DMA_PUT = 0x%08X  DMA_GET = "
                             "0x%08X%s\n", put, g,
                             g == put ? "" : "  (GPU behind)");
+                    fflush(stderr);
                 }
-                fflush(stderr);
             }
         }
+        /* Fence completion must follow execution, just like DMA_GET.
+         * A CPU surface lock otherwise observes completion before its queued
+         * clear runs, allowing that clear to erase freshly decoded pixels. */
+        fence_mirrors_tick();
         if (s_nv2a_trace) {
             static uint32_t last_start = 0xFFFFFFFFu;
             uint32_t start = *(volatile uint32_t *)((char *)regs + 0x600800);
@@ -1064,6 +1303,8 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
 
 static void xbox_Nv2aAckStart(void)
 {
+    pfb_arm_write_trap();
+    irq_arm_write_trap();
     dsp_ack_init();
     poke_init();
     g_nv2a_ack_stop = 0;
@@ -1622,6 +1863,7 @@ static DWORD WINAPI xbox_watchdog_thread(LPVOID unused)
      * CPU loop polling a global is exactly the case neither of those covers.
      */
     xbox_PeekSample("peek");
+    {extern void xbox_DumpEventTrace(void);xbox_DumpEventTrace();}
     /* The pushbuffer pointers, unconditionally.
      *
      * "Extend the table as more handshakes turn up -- run the title and the
@@ -2330,6 +2572,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         s_nv2a_trace = getenv("RECOMP_NV2A_TRACE") != NULL
                     || getenv("RECOMP_PB_SCAN") != NULL
                     || getenv("RECOMP_PB_EXEC") != NULL;
+        s_nv2a_transfer_trace = s_nv2a_trace && getenv("RECOMP_QUIET") == NULL;
         if (g_nv2a_memory) {
             fprintf(stderr, "  NV2A register aperture: %u MB at Xbox VA "
                     "0x%08X (zeroed, no register semantics)\n",
@@ -2710,16 +2953,28 @@ void xbox_ProtectMirrorsForDebug(void)
 
 void xbox_MemoryLayoutShutdown(void)
 {
+    if (g_nv2a_ack_thread) {
+        InterlockedExchange(&g_nv2a_ack_stop, 1);
+        if(WaitForSingleObject(g_nv2a_ack_thread, 1000)!=WAIT_OBJECT_0) {
+            /* A timeout is not consumer completion. Leave its device and
+             * guest backing alive; a later shutdown can retry after it exits. */
+            fprintf(stderr,"[HW SHUTDOWN] consumer still active; backing retained\n");
+            return;
+        }
+        CloseHandle(g_nv2a_ack_thread);
+        g_nv2a_ack_thread = NULL;
+    }
+    /* Release presentation references before the raster device, then permit
+     * the window's CPU path again. */
+    nv2a_gpu_present_shutdown();
+    xbox_FramebufferWindowGpuRequest(0);
+    nv2a_hw_shutdown();
     if (g_kernel_memory) {
         VirtualFree(g_kernel_memory, 0, MEM_RELEASE);
         g_kernel_memory = NULL;
     }
-    if (g_nv2a_ack_thread) {
-        InterlockedExchange(&g_nv2a_ack_stop, 1);
-        WaitForSingleObject(g_nv2a_ack_thread, 1000);
-        CloseHandle(g_nv2a_ack_thread);
-        g_nv2a_ack_thread = NULL;
-    }
+    if(g_pfb_veh){RemoveVectoredExceptionHandler(g_pfb_veh);g_pfb_veh=NULL;g_pfb_page=NULL;}
+    if(g_irq_veh){RemoveVectoredExceptionHandler(g_irq_veh);g_irq_veh=NULL;memset(g_irq_pages,0,sizeof(g_irq_pages));}
     if (g_nv2a_memory) {
         VirtualFree(g_nv2a_memory, 0, MEM_RELEASE);
         g_nv2a_memory = NULL;

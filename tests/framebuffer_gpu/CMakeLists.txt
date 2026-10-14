@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+project(framebuffer_gpu C)
+add_executable(framebuffer-gpu-test test_main.c
+    ../../src/video/fb_present.c ../../src/video/fb_gpu_present.c)
+target_include_directories(framebuffer-gpu-test PRIVATE ../../src/video)
+target_link_libraries(framebuffer-gpu-test PRIVATE user32 gdi32 d3d11 dxgi dxguid)
+if(MSVC)
+    target_compile_options(framebuffer-gpu-test PRIVATE /W4 /UNDEBUG)
+    target_compile_definitions(framebuffer-gpu-test PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+enable_testing()
+add_test(NAME framebuffer_gpu_copy_and_window_lifecycle COMMAND framebuffer-gpu-test)

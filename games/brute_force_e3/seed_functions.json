@@ -1,0 +1,152 @@
+[
+  {
+    "start": "0x003A4C00",
+    "observed": true,
+    "reason": "Measured GPU ISR registered by KeConnectInterrupt during prototype startup"
+  },
+  {
+    "start": "0x0028F620",
+    "observed": true,
+    "reason": "Measured game file-I/O worker passed as PsCreateSystemThreadEx context; failed ICALL at startup"
+  },
+  {
+    "start": "0x000A5620",
+    "observed": true,
+    "reason": "Measured material initialization ICALL; previously merged inside sub_000A55B0"
+  },
+  {
+    "start": "0x000A2290",
+    "observed": true,
+    "reason": "Measured material table ICALL from 0x00097AB5; table slot 0x003B7DF0"
+  },
+  {
+    "start": "0x003AC47C",
+    "observed": true,
+    "reason": "Measured XPP USB startup callback"
+  },
+  {
+    "start": "0x003ACE8D",
+    "observed": true,
+    "reason": "Measured XPP USB startup callback"
+  },
+  {
+    "start": "0x003AE407",
+    "observed": true,
+    "reason": "Measured USB enumeration callback from 0x003AFEFE after SET_CONFIGURATION"
+  },
+  {
+    "start": "0x001ACB80",
+    "observed": true,
+    "reason": "Measured common object-type factory ICALL from 0x0025C68F"
+  },
+  {
+    "start": "0x0031AD40",
+    "observed": true,
+    "reason": "Measured startup callback from 0x0031AF17"
+  },
+  {
+    "start": "0x003ADAFC",
+    "observed": true,
+    "reason": "Measured repeated XPP input callback from 0x003AE38A"
+  },
+  {
+    "start": "0x0037E540",
+    "observed": true,
+    "reason": "Measured XNET thread callback from 0x00378BAD"
+  },
+  {
+    "start": "0x0005A4F0",
+    "observed": true,
+    "reason": "Observed startup constructor via 0x0032AA74; initializes global graphics lookup state"
+  },
+  {
+    "start": "0x002E1D40",
+    "observed": true,
+    "reason": "Observed startup constructor via 0x0032AA74; initializes trigonometric lookup table"
+  },
+  {
+    "start": "0x0031AA20",
+    "observed": true,
+    "reason": "Observed startup constructor via 0x0032AA74; initializes CRC lookup table"
+  },
+  {
+    "start": "0x0010E320",
+    "observed": true,
+    "reason": "Observed direct call from menu update visitor 0x0010B307"
+  },
+  {
+    "start": "0x001151C0",
+    "observed": true,
+    "reason": "Observed direct call from menu update visitor 0x0010B307"
+  },
+  {
+    "start": "0x0016EC00",
+    "observed": true,
+    "reason": "Observed untranslated direct call from 0x0023B09C during tutorial object loading; original function returns with eight-byte argument cleanup"
+  },
+  {
+    "start": "0x0023A790",
+    "observed": true,
+    "reason": "Repeated unresolved object-loading callback observed during tutorial setup"
+  },
+  {
+    "start": "0x002EDFE0",
+    "observed": true,
+    "reason": "Observed unresolved scene-processing callback after tutorial assets loaded; later data-pointer targets are excluded as downstream corruption"
+  },
+  {
+    "start": "0x002EE170",
+    "observed": true,
+    "reason": "Observed unresolved scene-processing callback after tutorial assets loaded; later data-pointer targets are excluded as downstream corruption"
+  },
+  {
+    "start": "0x002F6EF0",
+    "observed": true,
+    "reason": "Observed unresolved scene-processing callback after tutorial assets loaded; later data-pointer targets are excluded as downstream corruption"
+  },
+  {
+    "start": "0x0021BF40",
+    "observed": true,
+    "reason": "Observed untranslated direct call from 0x000EC042 after tutorial scene setup"
+  },
+  {
+    "start": "0x00090A50",
+    "observed": true,
+    "reason": "Observed unresolved callback after tutorial scene setup"
+  },
+  {
+    "start": "0x00195690",
+    "observed": true,
+    "reason": "Observed untranslated direct call from 0x00081789; original entry has argument cleanup and register restoration"
+  },
+  {
+    "start": "0x0033F99B",
+    "observed": true,
+    "reason": "Observed DirectSound virtual-method dispatch from 0x00209792 after DSP doorbell completion; original method has RET 4 argument cleanup"
+  },
+  {
+    "start": "0x00388760",
+    "observed": true,
+    "reason": "Observed unresolved Bink block-decoder callback from 0x00389ACA during MGS_Logo_Final.bik; skipped calls leave output buffers uninitialized"
+  },
+  {
+    "start": "0x00385F60",
+    "observed": true,
+    "reason": "Observed unresolved Bink worker I/O callback from 0x00382F0E after block-decoder recovery; required to populate movie data"
+  },
+  {
+    "start": "0x003911E0",
+    "observed": true,
+    "reason": "Observed unresolved Bink pixel-conversion callback after correcting the guest MMX capability probe"
+  },
+  {
+    "start": "0x00391020",
+    "observed": true,
+    "reason": "Observed unresolved Bink pixel-conversion callback after correcting the guest MMX capability probe"
+  },
+  {
+    "start": "0x00157D40",
+    "observed": true,
+    "reason": "Measured direct tail jump from sub_00158440 during release gameplay; independent aligned lazy class-type getter with RET and no inherited frame"
+  }
+]

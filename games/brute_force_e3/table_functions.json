@@ -1,0 +1,756 @@
+[
+  {
+    "start": "0x0001EC90",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4B94; standard function entry pattern"
+  },
+  {
+    "start": "0x00028A50",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4678; standard function entry pattern"
+  },
+  {
+    "start": "0x00028DF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4AD8; standard function entry pattern"
+  },
+  {
+    "start": "0x0002CA40",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4444; standard function entry pattern"
+  },
+  {
+    "start": "0x000314B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B44E0; standard function entry pattern"
+  },
+  {
+    "start": "0x00034590",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x00034B20",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B45B0; standard function entry pattern"
+  },
+  {
+    "start": "0x00035840",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B45A0; standard function entry pattern"
+  },
+  {
+    "start": "0x00035CE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4560; standard function entry pattern"
+  },
+  {
+    "start": "0x0003A0B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4688; standard function entry pattern"
+  },
+  {
+    "start": "0x0003A230",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B46B8; standard function entry pattern"
+  },
+  {
+    "start": "0x0003E0D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBAC0; standard function entry pattern"
+  },
+  {
+    "start": "0x00040210",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B4860; standard function entry pattern"
+  },
+  {
+    "start": "0x00055FB0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B3C28; standard function entry pattern"
+  },
+  {
+    "start": "0x00056350",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B3C20; standard function entry pattern"
+  },
+  {
+    "start": "0x00056450",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B3C24; standard function entry pattern"
+  },
+  {
+    "start": "0x000580E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B3C1C; standard function entry pattern"
+  },
+  {
+    "start": "0x00065610",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B52F4; standard function entry pattern"
+  },
+  {
+    "start": "0x00066F90",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B529C; standard function entry pattern"
+  },
+  {
+    "start": "0x00068490",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B5680; standard function entry pattern"
+  },
+  {
+    "start": "0x000688D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B55B0; standard function entry pattern"
+  },
+  {
+    "start": "0x0006CB50",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B58F0; standard function entry pattern"
+  },
+  {
+    "start": "0x0006CF40",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B5D24; standard function entry pattern"
+  },
+  {
+    "start": "0x0006D0F0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B5D2C; standard function entry pattern"
+  },
+  {
+    "start": "0x00071C90",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6418; standard function entry pattern"
+  },
+  {
+    "start": "0x00072D20",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B657C; standard function entry pattern"
+  },
+  {
+    "start": "0x00073480",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B640C; standard function entry pattern"
+  },
+  {
+    "start": "0x000740A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6578; standard function entry pattern"
+  },
+  {
+    "start": "0x00074580",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B66BC; standard function entry pattern"
+  },
+  {
+    "start": "0x00075AF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B645C; standard function entry pattern"
+  },
+  {
+    "start": "0x00078160",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6734; standard function entry pattern"
+  },
+  {
+    "start": "0x0007F100",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B698C; standard function entry pattern"
+  },
+  {
+    "start": "0x00083330",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6A84; standard function entry pattern"
+  },
+  {
+    "start": "0x00083820",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BA0; standard function entry pattern"
+  },
+  {
+    "start": "0x000841C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6A78; standard function entry pattern"
+  },
+  {
+    "start": "0x00085B00",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BD4; standard function entry pattern"
+  },
+  {
+    "start": "0x00085D50",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B69F0; standard function entry pattern"
+  },
+  {
+    "start": "0x00085F70",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B69F4; standard function entry pattern"
+  },
+  {
+    "start": "0x00086D30",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6B98; standard function entry pattern"
+  },
+  {
+    "start": "0x00087CC0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6B90; standard function entry pattern"
+  },
+  {
+    "start": "0x00088750",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BAC; standard function entry pattern"
+  },
+  {
+    "start": "0x0008C930",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6AB8; standard function entry pattern"
+  },
+  {
+    "start": "0x0008E870",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BD8; standard function entry pattern"
+  },
+  {
+    "start": "0x0008EBD0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BE0; standard function entry pattern"
+  },
+  {
+    "start": "0x0008ED10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6BDC; standard function entry pattern"
+  },
+  {
+    "start": "0x0008FEB0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6C54; standard function entry pattern"
+  },
+  {
+    "start": "0x00090540",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6C70; standard function entry pattern"
+  },
+  {
+    "start": "0x00094A10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6D80; standard function entry pattern"
+  },
+  {
+    "start": "0x00097F60",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6EF4; standard function entry pattern"
+  },
+  {
+    "start": "0x00098420",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B6F68; standard function entry pattern"
+  },
+  {
+    "start": "0x00098E80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B70F0; standard function entry pattern"
+  },
+  {
+    "start": "0x00098FF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B70F8; standard function entry pattern"
+  },
+  {
+    "start": "0x00099D80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7218; standard function entry pattern"
+  },
+  {
+    "start": "0x0009A570",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B740C; standard function entry pattern"
+  },
+  {
+    "start": "0x0009AC80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7488; standard function entry pattern"
+  },
+  {
+    "start": "0x0009B5C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B767C; standard function entry pattern"
+  },
+  {
+    "start": "0x0009B810",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B76F8; standard function entry pattern"
+  },
+  {
+    "start": "0x0009B8D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B769C; standard function entry pattern"
+  },
+  {
+    "start": "0x0009C210",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7710; standard function entry pattern"
+  },
+  {
+    "start": "0x0009C3B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7718; standard function entry pattern"
+  },
+  {
+    "start": "0x0009D330",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7850; standard function entry pattern"
+  },
+  {
+    "start": "0x0009D580",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B784C; standard function entry pattern"
+  },
+  {
+    "start": "0x0009DAE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7920; standard function entry pattern"
+  },
+  {
+    "start": "0x0009E040",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B791C; standard function entry pattern"
+  },
+  {
+    "start": "0x0009E3B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7990; standard function entry pattern"
+  },
+  {
+    "start": "0x0009E6D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7A18; standard function entry pattern"
+  },
+  {
+    "start": "0x0009EFB0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7A14; standard function entry pattern"
+  },
+  {
+    "start": "0x0009F410",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7A88; standard function entry pattern"
+  },
+  {
+    "start": "0x0009FCE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7ADC; standard function entry pattern"
+  },
+  {
+    "start": "0x000A00D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7B50; standard function entry pattern"
+  },
+  {
+    "start": "0x000A0320",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7BB8; standard function entry pattern"
+  },
+  {
+    "start": "0x000A0C10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7C28; standard function entry pattern"
+  },
+  {
+    "start": "0x000A2290",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7DF0; standard function entry pattern"
+  },
+  {
+    "start": "0x000A2BF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7E5C; standard function entry pattern"
+  },
+  {
+    "start": "0x000A2EE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7ED0; standard function entry pattern"
+  },
+  {
+    "start": "0x000A32E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7F44; standard function entry pattern"
+  },
+  {
+    "start": "0x000A36A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7F48; standard function entry pattern"
+  },
+  {
+    "start": "0x000A4120",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B7FB8; standard function entry pattern"
+  },
+  {
+    "start": "0x000A5260",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8024; standard function entry pattern"
+  },
+  {
+    "start": "0x000A5FE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B810C; standard function entry pattern"
+  },
+  {
+    "start": "0x000A6290",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8180; standard function entry pattern"
+  },
+  {
+    "start": "0x000A8CA0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8298; standard function entry pattern"
+  },
+  {
+    "start": "0x000A94B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B83EC; standard function entry pattern"
+  },
+  {
+    "start": "0x000A9570",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B83F4; standard function entry pattern"
+  },
+  {
+    "start": "0x000ADF10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8984; standard function entry pattern"
+  },
+  {
+    "start": "0x000AF050",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8ACC; standard function entry pattern"
+  },
+  {
+    "start": "0x000B2440",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8E68; standard function entry pattern"
+  },
+  {
+    "start": "0x000B5E40",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9160; standard function entry pattern"
+  },
+  {
+    "start": "0x000BCEC0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B93BC; standard function entry pattern"
+  },
+  {
+    "start": "0x000BD270",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9348; standard function entry pattern"
+  },
+  {
+    "start": "0x000C0440",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x000C0E40",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B95CC; standard function entry pattern"
+  },
+  {
+    "start": "0x000C10D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9600; standard function entry pattern"
+  },
+  {
+    "start": "0x000C1840",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9630; standard function entry pattern"
+  },
+  {
+    "start": "0x000C6690",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9AF8; standard function entry pattern"
+  },
+  {
+    "start": "0x000C6970",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9880; standard function entry pattern"
+  },
+  {
+    "start": "0x000C7090",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9B54; standard function entry pattern"
+  },
+  {
+    "start": "0x000C7290",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9B70; standard function entry pattern"
+  },
+  {
+    "start": "0x000C7C10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9BF4; standard function entry pattern"
+  },
+  {
+    "start": "0x000CA750",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9C7C; standard function entry pattern"
+  },
+  {
+    "start": "0x000CCE20",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9FA0; standard function entry pattern"
+  },
+  {
+    "start": "0x000CE7E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA1EC; standard function entry pattern"
+  },
+  {
+    "start": "0x000CF0D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8EA4; standard function entry pattern"
+  },
+  {
+    "start": "0x000CFFC0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA1F0; standard function entry pattern"
+  },
+  {
+    "start": "0x000D0C50",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA21C; standard function entry pattern"
+  },
+  {
+    "start": "0x000D0F80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA248; standard function entry pattern"
+  },
+  {
+    "start": "0x000D1B00",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA2D4; standard function entry pattern"
+  },
+  {
+    "start": "0x000D3E60",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B8F38; standard function entry pattern"
+  },
+  {
+    "start": "0x000D4670",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003B9854; standard function entry pattern"
+  },
+  {
+    "start": "0x000D6470",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BA51C; standard function entry pattern"
+  },
+  {
+    "start": "0x000F5D70",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BAA70; standard function entry pattern"
+  },
+  {
+    "start": "0x000F8A10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BAD24; standard function entry pattern"
+  },
+  {
+    "start": "0x00113490",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BB54C; standard function entry pattern"
+  },
+  {
+    "start": "0x001149A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BB5E4; standard function entry pattern"
+  },
+  {
+    "start": "0x0011D740",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBCDC; standard function entry pattern"
+  },
+  {
+    "start": "0x0011E7D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBC94; standard function entry pattern"
+  },
+  {
+    "start": "0x0011EF20",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBD78; standard function entry pattern"
+  },
+  {
+    "start": "0x00120DD0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBD90; standard function entry pattern"
+  },
+  {
+    "start": "0x00120F20",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBD94; standard function entry pattern"
+  },
+  {
+    "start": "0x00122D70",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBDA4; standard function entry pattern"
+  },
+  {
+    "start": "0x001230A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBD68; standard function entry pattern"
+  },
+  {
+    "start": "0x0013C430",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBE28; standard function entry pattern"
+  },
+  {
+    "start": "0x00155600",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BE7E4; standard function entry pattern"
+  },
+  {
+    "start": "0x0015C7B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BEF70; standard function entry pattern"
+  },
+  {
+    "start": "0x0015C8F0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BEF7C; standard function entry pattern"
+  },
+  {
+    "start": "0x001648C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBD80; standard function entry pattern"
+  },
+  {
+    "start": "0x00166620",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x001676A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BBCB8; standard function entry pattern"
+  },
+  {
+    "start": "0x0016D1C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BF46C; standard function entry pattern"
+  },
+  {
+    "start": "0x00178DF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003BB978; standard function entry pattern"
+  },
+  {
+    "start": "0x00195620",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x00197BD0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C06D4; standard function entry pattern"
+  },
+  {
+    "start": "0x00197E70",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C07A4; standard function entry pattern"
+  },
+  {
+    "start": "0x00198350",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C0874; standard function entry pattern"
+  },
+  {
+    "start": "0x00198A30",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C08DC; standard function entry pattern"
+  },
+  {
+    "start": "0x00198EA0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C073C; standard function entry pattern"
+  },
+  {
+    "start": "0x001991E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C080C; standard function entry pattern"
+  },
+  {
+    "start": "0x00199800",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C0944; standard function entry pattern"
+  },
+  {
+    "start": "0x001A4A60",
+    "reason": "Factory callback pair registered with sub_0019EB60 in prototype code"
+  },
+  {
+    "start": "0x0020B500",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C35E4; standard function entry pattern"
+  },
+  {
+    "start": "0x00217F10",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C3B78; standard function entry pattern"
+  },
+  {
+    "start": "0x0021BFB0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C3FF4; standard function entry pattern"
+  },
+  {
+    "start": "0x0021E9A0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C47A4; standard function entry pattern"
+  },
+  {
+    "start": "0x0021EBD0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C459C; standard function entry pattern"
+  },
+  {
+    "start": "0x0021EEA0",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x0021EF80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C4030; standard function entry pattern"
+  },
+  {
+    "start": "0x0021F2E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C49AC; standard function entry pattern"
+  },
+  {
+    "start": "0x0021F660",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C4BEC; standard function entry pattern"
+  },
+  {
+    "start": "0x002211D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C4A80; standard function entry pattern"
+  },
+  {
+    "start": "0x00225C80",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C432C; standard function entry pattern"
+  },
+  {
+    "start": "0x0022B540",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C3FD4; standard function entry pattern"
+  },
+  {
+    "start": "0x0022C8B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C50E4; standard function entry pattern"
+  },
+  {
+    "start": "0x0022DF30",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5378; standard function entry pattern"
+  },
+  {
+    "start": "0x0022E000",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5264; standard function entry pattern"
+  },
+  {
+    "start": "0x00233730",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C556C; standard function entry pattern"
+  },
+  {
+    "start": "0x0023BCC0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C561C; standard function entry pattern"
+  },
+  {
+    "start": "0x0023C7E0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5624; standard function entry pattern"
+  },
+  {
+    "start": "0x0023D2B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C56EC; standard function entry pattern"
+  },
+  {
+    "start": "0x00241C40",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5918; standard function entry pattern"
+  },
+  {
+    "start": "0x00248DF0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5C2C; standard function entry pattern"
+  },
+  {
+    "start": "0x0024A3A0",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x0024B010",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5F0C; standard function entry pattern"
+  },
+  {
+    "start": "0x0024B9C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5F4C; standard function entry pattern"
+  },
+  {
+    "start": "0x0024D120",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003C5F48; standard function entry pattern"
+  },
+  {
+    "start": "0x002B46D0",
+    "reason": "Unconditional translated tail-jump target; aligned independent code entry after four NOPs with fresh entry instructions"
+  },
+  {
+    "start": "0x002E6BE0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CCFA4; standard function entry pattern"
+  },
+  {
+    "start": "0x002ED770",
+    "reason": "Function address installed by scene callback-table initializer 0x002EE190; verified code entry, not a runtime observation"
+  },
+  {
+    "start": "0x002ED870",
+    "reason": "Function address installed by scene callback-table initializer 0x002EE190; verified code entry, not a runtime observation"
+  },
+  {
+    "start": "0x002EDFB0",
+    "reason": "Function address installed by scene callback-table initializer 0x002EE190; verified code entry, not a runtime observation"
+  },
+  {
+    "start": "0x002F4200",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD13C; standard function entry pattern"
+  },
+  {
+    "start": "0x002F4390",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD150; standard function entry pattern"
+  },
+  {
+    "start": "0x002F4580",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD15C; standard function entry pattern"
+  },
+  {
+    "start": "0x002F4710",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD158; standard function entry pattern"
+  },
+  {
+    "start": "0x002F48B0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD144; standard function entry pattern"
+  },
+  {
+    "start": "0x002F6D50",
+    "reason": "Function address installed by scene callback-table initializer 0x002F7030; verified code entry, not a runtime observation"
+  },
+  {
+    "start": "0x00309060",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD4A4; standard function entry pattern"
+  },
+  {
+    "start": "0x0030A6D0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD4D8; standard function entry pattern"
+  },
+  {
+    "start": "0x00313D50",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD570; standard function entry pattern"
+  },
+  {
+    "start": "0x00315930",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD660; standard function entry pattern"
+  },
+  {
+    "start": "0x00319250",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD854; standard function entry pattern"
+  },
+  {
+    "start": "0x003198C0",
+    "reason": "Aligned prototype entry in code-pointer table at 0x003CD85C; standard function entry pattern"
+  },
+  {
+    "start": "0x00388480",
+    "observed": false,
+    "reason": "Bink alternate block-decoder callback assigned at 0x0038948A; independent aligned entry follows return and padding"
+  },
+  {
+    "start": "0x00391430",
+    "observed": false,
+    "reason": "Alternate Bink pixel converter in initialized descriptor table at 0x004F1D20; verified executable entry"
+  },
+  {
+    "start": "0x00398560",
+    "observed": false,
+    "reason": "Alternate Bink pixel converter in initialized descriptor table at 0x004F1D20; verified executable entry"
+  },
+  {
+    "start": "0x00397FC0",
+    "observed": false,
+    "reason": "Alternate Bink pixel converter in initialized descriptor table at 0x004F1D20; verified executable entry"
+  },
+  {
+    "start": "0x00398240",
+    "observed": false,
+    "reason": "Alternate Bink pixel converter in initialized descriptor table at 0x004F1D20; verified executable entry"
+  },
+  {
+    "start": "0x00397E00",
+    "observed": false,
+    "reason": "Alternate Bink pixel converter in initialized descriptor table at 0x004F1D20; verified executable entry"
+  }
+]

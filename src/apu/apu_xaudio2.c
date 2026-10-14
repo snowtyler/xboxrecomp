@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "apu_xaudio2.h"
 
@@ -61,6 +62,11 @@ int xa2_init(void)
     if (FAILED(hr)) {
         fprintf(stderr, "[XA2] CreateMasteringVoice failed: 0x%08lX\n", hr);
         goto fail;
+    }
+    if(getenv("RECOMP_AUDIO_MUTE")) {
+        hr=g_xa2_master->lpVtbl->SetVolume(g_xa2_master,0.0f,XAUDIO2_COMMIT_NOW);
+        if(FAILED(hr))goto fail;
+        fprintf(stderr,"[XA2] Output muted; source buffers and console processing remain active\n");
     }
 
     wfx.wFormatTag      = WAVE_FORMAT_PCM;

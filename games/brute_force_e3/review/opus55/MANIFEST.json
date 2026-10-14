@@ -1,0 +1,1079 @@
+{
+  "files": [
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 2506,
+      "sha256": "1e04ab56c19bbf3e08e6e56c2ebeb66a1819018a1d7611b516e2ed992e342556"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/build-verification.json",
+      "bytes": 3263,
+      "sha256": "50c709daa566d629cb11048249522d145fc644208529ce1a43bd89de4eb2680e"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal-frame-00419.bmp",
+      "bytes": 921654,
+      "sha256": "cac8274e4a42606af7bfbd6e86221782b867a22376bce1cbb1a2cc92c4cc9f55"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal-frame-00567.bmp",
+      "bytes": 921654,
+      "sha256": "d6582fdd62ae46a0d3bcfffa13a0c038b1e8b0e4150d7b40d72019bfd2e3a4a4"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal-frame-00681.bmp",
+      "bytes": 921654,
+      "sha256": "bc6c37fc08c5cad5a945e71f8eaac0d72e2471c1a6d977d25664cc8ab77dc3d3"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal-frame-00905.bmp",
+      "bytes": 921654,
+      "sha256": "6fd8d205e0af89d471f3708eac7fdbb622c79f2105c08f275adefc11239ff7af"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal-process.json",
+      "bytes": 1809,
+      "sha256": "7335abbfecd7a38f71b63aa35a8c96eb3b23483874440d25293b76f2e3630550"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal.json",
+      "bytes": 96,
+      "sha256": "1a10cf88b017a1048af594c6b96d5e09630eeac8fd326f555f8488ba0984d4d1"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal.stderr.log",
+      "bytes": 2350674,
+      "sha256": "2ccab7e6f62d2566f76bac621123d0b1f171f54f5c88acd3c46be00ef63eafd4"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/final_candidate139_normal.stdout.log",
+      "bytes": 342,
+      "sha256": "4cce551592d0c04471663defd0e8a03cf17a446dc18b6703d05066460eddd136"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/gpu-residency-investigation.md",
+      "bytes": 5983,
+      "sha256": "fdba2d5736afd64861d1c9e350d920aa66f165d88a9067a5b9b75f007a7c8a17"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/gpu_wait118.stderr.log",
+      "bytes": 505738,
+      "sha256": "5b1a318240b47866c48f0324b4d679ac68b1b901e45e8b2e35f25684aeb904c7"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf123-source-before.zip",
+      "bytes": 135043,
+      "sha256": "3ed5935a26368f7de4d25e697fb912ca52f8cb7f2a53246f06a745aa774c0234"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf132-gpu-contention.json",
+      "bytes": 1293,
+      "sha256": "f2891b453d73179942ba6a2231a1e93e95f8cb8a2a245558085ef01cac24a97d"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf137-vs138-final.json",
+      "bytes": 80529,
+      "sha256": "1fa25b80d6bfce59284595d7818a8b9d16cdd71d435bbe6bc9d3f422c09125a1"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-gpu-load.jsonl",
+      "bytes": 16894,
+      "sha256": "d77590441b76afe3457d3789e0fc4541d32c42b4950e900d5dc4a2b47291b609"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-performance-events.jsonl",
+      "bytes": 84180,
+      "sha256": "1b36f94049270c1dbd89436ee9710c76b41ff6d372fd8e3d4f7be0514d64d290"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-performance.json",
+      "bytes": 8771,
+      "sha256": "b8db50f609ee56c92c66ccf689c7f916f30eaf8fc321ad168de39e92b0fe7714"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-performance.md",
+      "bytes": 1329,
+      "sha256": "8fa400d5fb5055fe1270ab326a94f48b42f3fd909c9d76c3897a88a6b3361e78"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-process.json",
+      "bytes": 1161,
+      "sha256": "975215880c5a6db1b4d15aff352eafc1b5e5a282828f11fe661accf8cb57f1ee"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched-stall-inspection.json",
+      "bytes": 5308,
+      "sha256": "e4d60483969c8ce1da38bf9ecd84d3511f1d8590a9401de4cb69052a75cc68cc"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched.json",
+      "bytes": 95,
+      "sha256": "6ab85aa9e5c1e2ad5c6d3fc337ebca8064306b4b29bcad82dacf094759a7c63a"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched.stderr.log",
+      "bytes": 799929,
+      "sha256": "2cdacb0fd563455240d876fad52458c9e416e3406978111985ebe0582bc8248a"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched.stdout.log",
+      "bytes": 695,
+      "sha256": "066609c3f4da912a449388d13e6d0b819482d3d0c9b6d580070638d05a9db287"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline133_matched_resume-gpu-load.jsonl",
+      "bytes": 30055,
+      "sha256": "d06e6f465c5eab127af181f491a383d1fa6c776af325117a3dc91798e22da039"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-cpu-samples.json",
+      "bytes": 61437,
+      "sha256": "18231c24d11068ad5c5b04910c6e6cb469883eb2ac027466ad3a564a63f9e848"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-frame-00331.bmp",
+      "bytes": 921654,
+      "sha256": "6fe4fab201b0aea5d29274212321194b0e6eea5be59afb7be580f4bd80d9377a"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-gpu-load.jsonl",
+      "bytes": 42349,
+      "sha256": "a943edb14fe5ab2c7bf4434ed90d846df230813dd7854b5edaa0832959695203"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-nvidia.jsonl",
+      "bytes": 8969,
+      "sha256": "14b1259b5809cec5c419d47628d2ad316d6228fa8edbee5685fd7408f4c38240"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-performance-events.jsonl",
+      "bytes": 550581,
+      "sha256": "bb756411413d41975f368d01102dadaee4aca405a8b45927bf1bcba0c0c21843"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-performance.json",
+      "bytes": 61309,
+      "sha256": "b6aedb9144d7b3723ec592c26c1ad79b5ae9aceda4d860771debb7be8d5178ab"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-performance.md",
+      "bytes": 1474,
+      "sha256": "5248c78891f8c58d1df6509e2b2a0f943dd858ef228e1715918ea45a604a2ccd"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle-process.json",
+      "bytes": 1161,
+      "sha256": "76ef9e18ab983dfdc46cda800e0530af4574b0638c1f94f252cbae2921970859"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle.json",
+      "bytes": 96,
+      "sha256": "cee5917f83cd30e90e3d980741c8a504644349a9bcfe1ee36fb37e1bffd12390"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle.stderr.log",
+      "bytes": 1247621,
+      "sha256": "c94ec18ecf8345bb5c4fe6e2fe25de4975e53cd355bfe1c524ba0ee3cc8edd72"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_baseline137_idle.stdout.log",
+      "bytes": 2820,
+      "sha256": "168227e9fdad3929fa7e26c09cf09ec32e5067b68b2f1ffce9fda2c29d3d9d7d"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-cpu-samples.json",
+      "bytes": 59409,
+      "sha256": "54cfb14b797c2ba289857244bc499bd64f5cd3c538d19b2d791e78163e772d07"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-frame-00602.bmp",
+      "bytes": 921654,
+      "sha256": "323299d8197a99371a3798dbbfd14dc2c8e7673f70c51e8d1273d8f3a6d3b68b"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-frame-00726.bmp",
+      "bytes": 921654,
+      "sha256": "2ae8041c2d937b5059ce94b889dc3acbaafc542cbe8d1e74c1ddcbd7b6fb01c3"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-frame-00929.bmp",
+      "bytes": 921654,
+      "sha256": "16ead7b0a4c9dc2b6a45603512e3ccc679ea3cbd359f40a85c96ee8aac040a88"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-frame-01125.bmp",
+      "bytes": 921654,
+      "sha256": "c65fe0a0a07c9ee2a64c670219b2400382960790af6531ba691ee197efebea4d"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-frame-01209.bmp",
+      "bytes": 921654,
+      "sha256": "ad6bbe09adb4b966724ded678aab2b473a636cb524f284803b7d13c1af498f1d"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-guest-inspection.json",
+      "bytes": 3810,
+      "sha256": "dd152a425f091fbd97b6b143194ee8034493ef7ba62f4e97ada6c8af729d76e7"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-performance-events.jsonl",
+      "bytes": 3563809,
+      "sha256": "ac3e040cac6b76bd5211e1bbd0adef15a847877d514cc44573a7f1c9cd170338"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-performance.json",
+      "bytes": 11171,
+      "sha256": "14416f745e08f54b669479887c7bbe8d6b5f393ba732a8d5c6e5c87a7ae9f50c"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-performance.md",
+      "bytes": 2166,
+      "sha256": "56d02355c43c2e142f98f6b5641439fc85315ef6ac1fc81bde0f9612329b5b61"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay-process.json",
+      "bytes": 1828,
+      "sha256": "730a0e04103cb634d63362ee337f3676af92a901388da507f04b54c541989059"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay.json",
+      "bytes": 97,
+      "sha256": "02ba6ed7c1f027a63bd846ce2f8d7bc1b2f7a2f80fc5c7d9e63a2e8a617af756"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay.stderr.log",
+      "bytes": 4431481,
+      "sha256": "f065d839950c2d0fc9dcb73331a4a1c539c2d0b6bef168fea31c499fb1f437af"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate132_default_replay.stdout.log",
+      "bytes": 6639,
+      "sha256": "da2fa332f6868af82d1696e1493a629fbdcea2714d12ffeee14aa7dedc235d64"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-cpu-samples.json",
+      "bytes": 61331,
+      "sha256": "d55976b9f50f8563ddbd5766fa0c171439d86edcf1f465906133f5874f2490c0"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-frame-00320.bmp",
+      "bytes": 921654,
+      "sha256": "1ec4c9583f6e2a90f3b4420b5114b213b45b622a645d964ea5285d8ca08dd61b"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-gpu-load.jsonl",
+      "bytes": 42927,
+      "sha256": "f60a8b525643700fd3a63a2cd7dc0c02212fafb82a3ebfba7d276f96f78c4361"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-nvidia.jsonl",
+      "bytes": 31740,
+      "sha256": "fe1f9a2ce1714b6f1d428b2db7d3bd47e88e992971644bd3c688d4aeaa3e97cb"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-performance-events.jsonl",
+      "bytes": 1057488,
+      "sha256": "3d7e549fde37404da1257226576700ba813818039a7bd0e01b609eafef8a2db1"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-performance.json",
+      "bytes": 9467,
+      "sha256": "da3d40846a8bef93ac3bdc75257923fdeaf77edd14cf03d490bfd4dae73d5b12"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-performance.md",
+      "bytes": 2262,
+      "sha256": "52526b3621d71a223091471d0e660d9a123b9a468a7d22facfcb720a7d61b086"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle-process.json",
+      "bytes": 1159,
+      "sha256": "98e62a97dbb4fd9740ff3ae3dae42aab8ba5fa1fa6453b6febe70c8fc7759667"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle.json",
+      "bytes": 96,
+      "sha256": "1f25a4f75ffc3b135f4b14475f79939fbc375dbb55aff79a72d576782288d162"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle.stderr.log",
+      "bytes": 1502731,
+      "sha256": "8bb3c8a26e8cb73ecfcf550f1bca641e54a8cc59c26482e076169fe6e6349a57"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/perf_candidate138_idle.stdout.log",
+      "bytes": 2801,
+      "sha256": "3e4cd9338a7c662014698f8b85f76b06d2f595bb4f52e979d72f72e0b20a4b7a"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/performance-investigation.md",
+      "bytes": 20022,
+      "sha256": "66aa51f1581b918e3f312de1a79ca58d7012756089dc48196ffde4baa9f513a6"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/performance-work-state.json",
+      "bytes": 3353,
+      "sha256": "a0d88e24346dc222d12271d224b50337a9be40f725940990db3e49232bf3e543"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/readback119-cpu-samples.json",
+      "bytes": 58440,
+      "sha256": "3048306d2f516fa4d2666b7d621f49c36af50d136c3e7f3bd7b38dcbf6698b43"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-fences132-default-gpu.log",
+      "bytes": 2343,
+      "sha256": "da2a410fd92162d560bc9017f507d1a2f5ca9ceca7d39b3866e4160416c00156"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-fences132-event-gpu.log",
+      "bytes": 2343,
+      "sha256": "5a37a72b986d8c288c9f07a16811179a323cb0a1c8090e48d59389e58efb2343"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-framebuffer-gpu131.log",
+      "bytes": 406,
+      "sha256": "74db0a5bf0d5ea568534de8e85afd96efb5363f612424b356b9458ff7caf70a4"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-keyboard132-final.log",
+      "bytes": 118,
+      "sha256": "f9ac917e75fd39d61601f1b65dde5a6575e16ad9e2a6a8a34677622e499e4339"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-launcher132-final.json",
+      "bytes": 364,
+      "sha256": "b5f6084af215c13f785e6738af315250641deed006706dd59e87ff9f0500a2c7"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-pushbuffer132-final.log",
+      "bytes": 220,
+      "sha256": "54ea2e7af15872cd3b12f7d1cadbe85e1f83ee1e0cd8e53a8d3caeb67578b2b9"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-raster132-default.log",
+      "bytes": 915,
+      "sha256": "49a59cd33f5a1212524326fbcb1a155f3869022aa9d3f81a6e08d2b9ee89a69b"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-raster132-event-pool-bulk.log",
+      "bytes": 919,
+      "sha256": "090573e2b971736c8464f4472ca346bd533fa4f85320ca9fb8133d5b275434ce"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-raster132-event-reload.log",
+      "bytes": 917,
+      "sha256": "f2e5f31de21898c8266b189fbc6ee4beec7b4a4d2ef1e170dcbf0d4cd6393d51"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-vertex132-input-mask-expanded.log",
+      "bytes": 74,
+      "sha256": "55b0da56d0b96a44ccb1a4c1a016f74d34dd9b2382c92839a67a3867f5eacf6c"
+    },
+    {
+      "path": "games/brute_force_e3/analysis/test-xaudio2132-final.log",
+      "bytes": 861,
+      "sha256": "d1f5da5ac79039fb08a100a60afd6f09e4eb58ddadead5b4bd583e55ad44d38f"
+    },
+    {
+      "path": "games/brute_force_e3/audit_epilogues.py",
+      "bytes": 4723,
+      "sha256": "dbd733a117698c3ac1cc8ddde8bdf36383bdfdd186e845201cc2000d4b07e888"
+    },
+    {
+      "path": "games/brute_force_e3/build.ps1",
+      "bytes": 1669,
+      "sha256": "d5d0f0cd7e10c8dfcf87e8bb176abf818ebd0d33cfcc1b92ab9140d9a4c57e1e"
+    },
+    {
+      "path": "games/brute_force_e3/CMakeLists.txt",
+      "bytes": 5076,
+      "sha256": "552d14f6de186661ca85fae8958bb751a183d4557700600f7754a536b8237132"
+    },
+    {
+      "path": "games/brute_force_e3/coalesce_functions.json",
+      "bytes": 7697,
+      "sha256": "69b4e8e3634ff20ae1d39916a0d07ce1f07a8656d615a82400511e2abbc33318"
+    },
+    {
+      "path": "games/brute_force_e3/compare_performance.py",
+      "bytes": 6725,
+      "sha256": "445179a24971b005ff373129b627178716f09902252e51a477aa68885efeddc1"
+    },
+    {
+      "path": "games/brute_force_e3/inspect_guest.py",
+      "bytes": 9304,
+      "sha256": "a2d9214640ee395d82fdf06085514167bf7792328a98d4090966b22e255c0748"
+    },
+    {
+      "path": "games/brute_force_e3/manual_functions.json",
+      "bytes": 19,
+      "sha256": "75999b1632b0feed96e9cad9b8b781e8eec90dafdb2c0ac23c1bab4c379f0736"
+    },
+    {
+      "path": "games/brute_force_e3/monitor_gpu.ps1",
+      "bytes": 1480,
+      "sha256": "b29e7d94fe748f993841d42e95c16ff2e7d1827f94131dac3589ac75651de07d"
+    },
+    {
+      "path": "games/brute_force_e3/monitor_nvidia.ps1",
+      "bytes": 1238,
+      "sha256": "271f567ef3a17e477c02cd0a3991e525e14ceab3e59ab0a0600a07d3b9e09334"
+    },
+    {
+      "path": "games/brute_force_e3/PERFORMANCE.md",
+      "bytes": 10079,
+      "sha256": "a08cf2ab0f7b5fbd64db9359ec3a3f9e01437bf43da9ce9a2184602e7f28ba56"
+    },
+    {
+      "path": "games/brute_force_e3/performance.ps1",
+      "bytes": 3776,
+      "sha256": "08dc48b0da1380af7d93624513714ed526e1c34619167d42e1272f1cf631ec49"
+    },
+    {
+      "path": "games/brute_force_e3/performance.py",
+      "bytes": 24104,
+      "sha256": "c34ce1816afe3b9d5006b24b7da0c9768073ab656cb360faefea5ce93e4b5032"
+    },
+    {
+      "path": "games/brute_force_e3/play.ps1",
+      "bytes": 4278,
+      "sha256": "7430c411e064f365895adde9efa43ee15aa212e3ce67e45d38fd9e5bd64b1d20"
+    },
+    {
+      "path": "games/brute_force_e3/prepare_functions.py",
+      "bytes": 1901,
+      "sha256": "94142eef50712c254c935cc2f06ae456c044679e40fa306a90cdc6c96835ce58"
+    },
+    {
+      "path": "games/brute_force_e3/probe.py",
+      "bytes": 7243,
+      "sha256": "f961dfa84639903997a515ad01942ca63e3f585585dbb9c1d1d4e7a879632e5c"
+    },
+    {
+      "path": "games/brute_force_e3/probe_runtime.ps1",
+      "bytes": 1806,
+      "sha256": "65b5c277eebe152cb91304b0c4713ecb963d960dafe96e6db9fa361f48489941"
+    },
+    {
+      "path": "games/brute_force_e3/README.md",
+      "bytes": 14474,
+      "sha256": "9792bf03c75ea4afb00c3c38aa16d2bd54eea47ba8633cf075d2521190d21d61"
+    },
+    {
+      "path": "games/brute_force_e3/recompile.py",
+      "bytes": 2916,
+      "sha256": "91f115788f83745f5b49aae0257c02baec17d5a501d7fdaa4a490a7d2b395edd"
+    },
+    {
+      "path": "games/brute_force_e3/review/opus55/make_bundle.py",
+      "bytes": 5359,
+      "sha256": "b80d130a8649647cceca5ccca22508fc4b5b795e4a91769b0daaa6179f66a1c9"
+    },
+    {
+      "path": "games/brute_force_e3/review/opus55/PROMPT.md",
+      "bytes": 5517,
+      "sha256": "1d7329e59d77befefccef678e8c02daf2ef2c3e191db8b5909962b4d94c522a8"
+    },
+    {
+      "path": "games/brute_force_e3/review/opus55/SNAPSHOT.md",
+      "bytes": 5387,
+      "sha256": "98b0a133c725062c97ee2e33696ff23df6645a8ade584fcb3067578813328a89"
+    },
+    {
+      "path": "games/brute_force_e3/review/opus55/SOURCE_DELTA.patch",
+      "bytes": 54599,
+      "sha256": "b0721031c86e74a895cbbca66e88b68efb54853717f45834a6aa6aeb51aa2ea0"
+    },
+    {
+      "path": "games/brute_force_e3/sample_cpu.py",
+      "bytes": 7039,
+      "sha256": "908ead577cdf5a3a2bd68ba060c123c6f20c3b7ce93da8692f04e8ae740dfce9"
+    },
+    {
+      "path": "games/brute_force_e3/seed_functions.json",
+      "bytes": 5016,
+      "sha256": "9bbce510445764b8f08777499253e9f89cb2f23f6454bcc2b546893c5f2224a9"
+    },
+    {
+      "path": "games/brute_force_e3/src/main.c",
+      "bytes": 23672,
+      "sha256": "2d86807cae4c0ce3963cc792b96532faa8a1e064c590fca683ce3aff3782b072"
+    },
+    {
+      "path": "games/brute_force_e3/src/recomp_cpu.c",
+      "bytes": 647,
+      "sha256": "44bba2e817960f45a00cc3b41e17ab911dcad69ae781fd442786fdc3323dfb82"
+    },
+    {
+      "path": "games/brute_force_e3/src/recomp_manual.c",
+      "bytes": 15369,
+      "sha256": "d00f4b452dee0eab102f0790010f71a7e17b142808a14516345bd5e35fc56a39"
+    },
+    {
+      "path": "games/brute_force_e3/STATUS.md",
+      "bytes": 60214,
+      "sha256": "366fe2db4b70812a9472ea8364f6046754f06b0d9121a7b9fb9fa727bbc8d308"
+    },
+    {
+      "path": "games/brute_force_e3/table_candidates.py",
+      "bytes": 2967,
+      "sha256": "df58a37454864280156ecc67d4377bcd2b1aa5eb6105520e0c6f7fbe05f15ba3"
+    },
+    {
+      "path": "games/brute_force_e3/table_functions.json",
+      "bytes": 28370,
+      "sha256": "4dcc76f00030bcd776cf3bdfd3670e053f22dbbf6e961d6731264d8a5166897c"
+    },
+    {
+      "path": "games/brute_force_e3/test_launcher.ps1",
+      "bytes": 4397,
+      "sha256": "8b6defaec385c0aa02d22692a4faf4fe74415752bcad26cc6ce8c4f90ffe5e51"
+    },
+    {
+      "path": "games/brute_force_e3/trace_audio_queue.py",
+      "bytes": 878,
+      "sha256": "657ddfe2a8bb7b25618501483f86330d922c09e43cb0026094298cad152cef23"
+    },
+    {
+      "path": "games/brute_force_e3/trace_loader.py",
+      "bytes": 828,
+      "sha256": "cde97c7c588452a28400879aa1172c8432417b2af43e5340df01aef9d80dc89e"
+    },
+    {
+      "path": "games/brute_force_e3/trace_sdk_writer.py",
+      "bytes": 2155,
+      "sha256": "a2647d3cd03ec51282b980ab20c6ba8e601e9559de9fa605c5f6e6395b6057c1"
+    },
+    {
+      "path": "games/brute_force_e3/trace_stubs.py",
+      "bytes": 922,
+      "sha256": "ce9e91524ec8244555fd0770bf538ade9eab7a1b39b16c69533d60ff1febe01c"
+    },
+    {
+      "path": "include/xbox/xboxrecomp.h",
+      "bytes": 2820,
+      "sha256": "2b29bace5c1cb699079aa1de0fe47ea7c8cc95e667cc4f2ed98c0d4a79bae497"
+    },
+    {
+      "path": "src/apu/apu.h",
+      "bytes": 2816,
+      "sha256": "f227651c0eb6d77101a118cc8f438a42e347ee0d087bc96aada74f57e28f0695"
+    },
+    {
+      "path": "src/apu/apu_core.c",
+      "bytes": 36573,
+      "sha256": "8672dc9030e909ad39c9137c7a95f40d0f9c73027f1573a3225ee22dd2aa30ad"
+    },
+    {
+      "path": "src/apu/apu_debug.h",
+      "bytes": 2489,
+      "sha256": "f15466fe6634744d2ee1c8a772150097e366a3e2a8415825d983806ac4a2674a"
+    },
+    {
+      "path": "src/apu/apu_dsp.c",
+      "bytes": 8645,
+      "sha256": "74ad90c772f010ab0db2828f3fd6182337b9ff9a311098e01b99bbfc7e61e317"
+    },
+    {
+      "path": "src/apu/apu_mmio_hook.c",
+      "bytes": 11078,
+      "sha256": "47c424ce4e11b807ebcf87c53f00008154a2c0b99052ae826da06f90ec36f2a9"
+    },
+    {
+      "path": "src/apu/apu_regs.h",
+      "bytes": 22002,
+      "sha256": "865cb001c02b081da3d9798024dc3d9068a0fefe791f22be4268dfc41b987097"
+    },
+    {
+      "path": "src/apu/apu_shim.h",
+      "bytes": 15016,
+      "sha256": "87963d75c51c406683e741fa48737a96d26ddcbe2831935b5451290edef9b0e7"
+    },
+    {
+      "path": "src/apu/apu_state.h",
+      "bytes": 17026,
+      "sha256": "8eab6947ac52e05fff6e6f3e4ad615f07a15124c475ac2ac8943aa98d5507841"
+    },
+    {
+      "path": "src/apu/apu_vp.c",
+      "bytes": 53308,
+      "sha256": "4998950767f3091ef31019cf2c419495140dcf11bbd49447a1c5e9c618f48f40"
+    },
+    {
+      "path": "src/apu/apu_xaudio2.c",
+      "bytes": 5720,
+      "sha256": "3f9b75f6ff1358b0f0a65f54a1aeb639596ea81460898cbfb128200275b6b1d1"
+    },
+    {
+      "path": "src/apu/apu_xaudio2.h",
+      "bytes": 598,
+      "sha256": "d9461883a2bad2d589809f560e173e272fe1fe5962730266e3e9f05685a041cf"
+    },
+    {
+      "path": "src/apu/CMakeLists.txt",
+      "bytes": 1622,
+      "sha256": "7fb1969c2de06d197525ec5c2ed6e9e02af2bc8bc06a3998c17691b21c5c1d95"
+    },
+    {
+      "path": "src/apu/fpconv.h",
+      "bytes": 1822,
+      "sha256": "ca7e711189b49e441912092643f0a21e675c31c8b6d4b8a1b3c75813ae60bdf4"
+    },
+    {
+      "path": "src/kernel/bridge_guest_handles.h",
+      "bytes": 3194,
+      "sha256": "e8746239a86b596a69a6aa51f6a0501170c16810fc6b77b800218ffb41f8e0b1"
+    },
+    {
+      "path": "src/kernel/CMakeLists.txt",
+      "bytes": 1954,
+      "sha256": "dcd04b70a78c8654544d3d8a4efbd7a6809a872e68a208c4bf7417eef4aab35b"
+    },
+    {
+      "path": "src/kernel/guest_vmem.c",
+      "bytes": 13446,
+      "sha256": "cfd5a7d240972ce05ff44c353d95ad8d3eb314a22b1a802146bd2363f8acf091"
+    },
+    {
+      "path": "src/kernel/guest_vmem.h",
+      "bytes": 2688,
+      "sha256": "411539d16fd3baa994dd301395cf143471b8e445fb1eb52ff828da8979635c77"
+    },
+    {
+      "path": "src/kernel/icall_feedback.c",
+      "bytes": 6855,
+      "sha256": "3a463ed04cb7e0be8978eec1db4b9b51c2e9a4b01e505015ab070789993f2d01"
+    },
+    {
+      "path": "src/kernel/kernel.h",
+      "bytes": 50219,
+      "sha256": "00ed2524583827e3b2c6cd0ce36070ee256b026e09c6cb5adb2580ea7ef312cd"
+    },
+    {
+      "path": "src/kernel/kernel_bridge.c",
+      "bytes": 398079,
+      "sha256": "1209f62332c5f4c3a142a02c72a546eac3104679e8de185983698d8009ddfe2f"
+    },
+    {
+      "path": "src/kernel/kernel_crypto.c",
+      "bytes": 12243,
+      "sha256": "b466e6aeffd6b7e8c82451f917db06a4b2240ab2dc66c374a3b04f25e2114e4b"
+    },
+    {
+      "path": "src/kernel/kernel_file.c",
+      "bytes": 58485,
+      "sha256": "f1cbe97e416b7773bf2a5354b5748dabc5bc461f00997d57d2172ac800cf85da"
+    },
+    {
+      "path": "src/kernel/kernel_hal.c",
+      "bytes": 37109,
+      "sha256": "5c3738ae8bdc9b27cd275f91ceedf55f12a6f17e6fcb5a158597e6532fc3be02"
+    },
+    {
+      "path": "src/kernel/kernel_io.c",
+      "bytes": 13040,
+      "sha256": "be99a0cf85b70751b6577ee5dc2aa7917d86cb39ed241920084e94254b350ddb"
+    },
+    {
+      "path": "src/kernel/kernel_memory.c",
+      "bytes": 13014,
+      "sha256": "e2428cef777f275ae5323ba0860f4dc7d04f28917dc6f1053adebc6f0269deb9"
+    },
+    {
+      "path": "src/kernel/kernel_ob.c",
+      "bytes": 4442,
+      "sha256": "4f4fde355e8402a82932cf5cff6e6a2110bb8901f1c4bd1f6fa097a602476390"
+    },
+    {
+      "path": "src/kernel/kernel_path.c",
+      "bytes": 25417,
+      "sha256": "eb5f296bd71329ed20c74ccee4e1ab817b80fb8e61a6290bf23304585c611c0e"
+    },
+    {
+      "path": "src/kernel/kernel_pool.c",
+      "bytes": 1495,
+      "sha256": "69f501a70d46d63e392e9a61d6dcf372bee4cd8d5e76ce7e870c88a2c5da9ece"
+    },
+    {
+      "path": "src/kernel/kernel_rtl.c",
+      "bytes": 26285,
+      "sha256": "950c370d462b676a6803e52e7c6dee6d13f058a7f2403412970522bab065de61"
+    },
+    {
+      "path": "src/kernel/kernel_sync.c",
+      "bytes": 20028,
+      "sha256": "4c1faec82592f237ed8aeabedcc8d1563ed7437773b3635d172a115f8b87b00c"
+    },
+    {
+      "path": "src/kernel/kernel_thread.c",
+      "bytes": 15544,
+      "sha256": "9ebf02038c57f4cfe52dcfbcf974686545bac82858eda51bc2bceb9b7326918b"
+    },
+    {
+      "path": "src/kernel/kernel_thunks.c",
+      "bytes": 21810,
+      "sha256": "d5aaa4387b69e86ddc1a4a7985cb1af08b0fda26a393faaca09de38b95665572"
+    },
+    {
+      "path": "src/kernel/kernel_xbox.c",
+      "bytes": 8983,
+      "sha256": "597d9762d6a36fd94623d1ee730f91a14a009434a2cd30cf0e0dedf7cc3c4829"
+    },
+    {
+      "path": "src/kernel/nv2a_clear_rect.h",
+      "bytes": 2148,
+      "sha256": "b57277a5a1978a52d19c167914fd023571fd33dbbe63e4791368831425d20e43"
+    },
+    {
+      "path": "src/kernel/nv2a_clip.h",
+      "bytes": 3390,
+      "sha256": "456c2534b806394f7349ae572b019d20db79afcbcd3eb71b5ed4e6d8a2b41623"
+    },
+    {
+      "path": "src/kernel/nv2a_combiner.c",
+      "bytes": 8394,
+      "sha256": "0f5ee8545624711af24c00f5dd1de073f5f98cde872e5205802734a080a518e8"
+    },
+    {
+      "path": "src/kernel/nv2a_combiner.h",
+      "bytes": 2021,
+      "sha256": "23a60012abf0db2e7f4d04f9fe2160d7ec5ff57da36edbb528cf9118337e4d36"
+    },
+    {
+      "path": "src/kernel/nv2a_combiner_hlsl.c",
+      "bytes": 5018,
+      "sha256": "c725b69493877cea3868da4c5f08144ebaa1f23ba210e459508f29fb8d965bc0"
+    },
+    {
+      "path": "src/kernel/nv2a_combiner_hlsl.h",
+      "bytes": 514,
+      "sha256": "078d8faa0cc10cc574c5ba9bfb0bb7aa6f8409b0b62c644db465dae7e70e115c"
+    },
+    {
+      "path": "src/kernel/nv2a_hw_raster.c",
+      "bytes": 53412,
+      "sha256": "0d256d77d52f5e9314edaac2ac109e765a8b94e6088a2a71a9a55c1f5425612f"
+    },
+    {
+      "path": "src/kernel/nv2a_hw_raster.h",
+      "bytes": 3291,
+      "sha256": "5a44650a8cf74f1b60eaf2cb55a076a39110dd49e4e822d0689e3a3eb1834dd9"
+    },
+    {
+      "path": "src/kernel/nv2a_pb_exec.c",
+      "bytes": 170671,
+      "sha256": "4afca501e8fbb401599dcd05fabc11d5a6a47cc462158fa81d876b846d0d99ed"
+    },
+    {
+      "path": "src/kernel/nv2a_pb_scan.c",
+      "bytes": 15835,
+      "sha256": "75d5031dede0e2e1866a5c11988ba5e86148689b092934cbe24698005f5b2314"
+    },
+    {
+      "path": "src/kernel/nv2a_vertex_cache.h",
+      "bytes": 1359,
+      "sha256": "d0ed76a4883f914e51a3a6f9b21399b812708f0f6bb5965c51d40b6383e574c7"
+    },
+    {
+      "path": "src/kernel/nv2a_vsh_hlsl.c",
+      "bytes": 5763,
+      "sha256": "9ce912f34c9059435fddea3c61041d0d70d387c1c9ce2344afd21087457936df"
+    },
+    {
+      "path": "src/kernel/nv2a_vsh_hlsl.h",
+      "bytes": 557,
+      "sha256": "d889b495837ad39e2fb350e2d8df086217397fbc5b8a33b77b726f08e1bdee52"
+    },
+    {
+      "path": "src/kernel/nv2a_vsh_interp.c",
+      "bytes": 15981,
+      "sha256": "87edda8f0e0bfc77d7b313c82311805a9a3b1876e321ec32ca59a1b70b049606"
+    },
+    {
+      "path": "src/kernel/nv2a_vsh_interp.h",
+      "bytes": 3392,
+      "sha256": "e600a28e8abe667582449bc072888fa32537e9e33e6f3a42b2dca95ada4b2a1f"
+    },
+    {
+      "path": "src/kernel/recomp_icall_feedback.h",
+      "bytes": 4438,
+      "sha256": "0b1bad1bd8ad593d13a7f934e5d641d4c69175e340482d9e45a7a08b636d61b3"
+    },
+    {
+      "path": "src/kernel/recomp_trace.c",
+      "bytes": 10710,
+      "sha256": "a3eb8799b2be9f27b046327062ca4f23441e835a1651caf1afb96a571822c0e4"
+    },
+    {
+      "path": "src/kernel/xbox_memory_layout.c",
+      "bytes": 164021,
+      "sha256": "17bce57ab937e77745c460af4eec85b9dfb7c4371ab36ec1db780f450fe77f00"
+    },
+    {
+      "path": "src/kernel/xbox_memory_layout.h",
+      "bytes": 25268,
+      "sha256": "ffa7e2c77bbbe715a472194f0b308db84c22ab03420d55f20f2e9c38e75f040a"
+    },
+    {
+      "path": "src/nv2a/nv2a_core.c",
+      "bytes": 24501,
+      "sha256": "560b2cc8dde9536d4ec54b82acd5ad04239628680d0a27ad73f3ad117bef7ffc"
+    },
+    {
+      "path": "src/nv2a/nv2a_mmio_hook.c",
+      "bytes": 15941,
+      "sha256": "c233f62ae7bbff374bba0e55e380297e6debf7c012e3392958edf113f37ed285"
+    },
+    {
+      "path": "src/nv2a/nv2a_mmio_hook.h",
+      "bytes": 1771,
+      "sha256": "b25c9079b1cd9885a6ff08de3423842e886bb09ad0fef1d6ab470c00ca66d1c5"
+    },
+    {
+      "path": "src/nv2a/nv2a_regs.h",
+      "bytes": 101941,
+      "sha256": "74d6e47773affd0912e88515b0af98b6e5c38678a0843c61a5066c50e0195b2b"
+    },
+    {
+      "path": "src/nv2a/nv2a_state.h",
+      "bytes": 6554,
+      "sha256": "fd65e9774a54ff9c26272f1a3ef105e1a63e79048c9fa17b63c25d4084521858"
+    },
+    {
+      "path": "src/nv2a/qemu_shim.h",
+      "bytes": 12824,
+      "sha256": "577575b08257f6e81ae1a24ba83350980be9f6205b79c9322c2a4c5f37f89cc8"
+    },
+    {
+      "path": "src/video/CMakeLists.txt",
+      "bytes": 468,
+      "sha256": "0899f793d9ba38d524b44c73bcfbc6ba438e46fedaea980b7228e9b661b7d853"
+    },
+    {
+      "path": "src/video/fb_gpu_present.c",
+      "bytes": 9493,
+      "sha256": "5dc8863f48f33f228e8553797997a45e4507671edbccef5da135768e8b5995ae"
+    },
+    {
+      "path": "src/video/fb_gpu_present.h",
+      "bytes": 1841,
+      "sha256": "c6fdaae173567e66b3835092af197a4f3ad1c15552c2537dad47abe9b48d1182"
+    },
+    {
+      "path": "src/video/fb_present.c",
+      "bytes": 18068,
+      "sha256": "dd94ff633bc996b44c5f0ed89df8ed83e0e43952b04c2fc172bfe51031684bfa"
+    },
+    {
+      "path": "src/video/video_player.c",
+      "bytes": 24220,
+      "sha256": "349c9479c1102d92600a9013bccb56a7235c522e9f2db36702381ed9e0ad8c07"
+    },
+    {
+      "path": "src/video/video_player.h",
+      "bytes": 2821,
+      "sha256": "64cbf1ef1364b2bc7eed04c7c7cae8b67570b8567beff328a47bb98adf2891bc"
+    },
+    {
+      "path": "src/video/video_pump.c",
+      "bytes": 6003,
+      "sha256": "7e67799da8ac1283c2f0f7300cfe017502596d4073e14f3602fd55dca40d3f1d"
+    },
+    {
+      "path": "templates/runtime/kernel_stubs.h",
+      "bytes": 21251,
+      "sha256": "246af27b52c1d02cda0fe8d6631e1edeed55ff47ca5053f8450e824953886d03"
+    },
+    {
+      "path": "templates/runtime/recomp_types.h",
+      "bytes": 64459,
+      "sha256": "9e2acdb44016abc014b3003c77efa1250c48532c51c346553207016de894a598"
+    },
+    {
+      "path": "templates/runtime/xbox_memory.h",
+      "bytes": 9596,
+      "sha256": "12698d038c280fca9dd0eeeea0ca7bee214f54de28e096860b81beeacf873dd8"
+    },
+    {
+      "path": "tests/apu_mixdown/CMakeLists.txt",
+      "bytes": 1403,
+      "sha256": "bb77c14026f9c4cdc824dbcad5570211963cb46a71896da7ea29d73253cd29b3"
+    },
+    {
+      "path": "tests/apu_mixdown/monitor_test.c",
+      "bytes": 1723,
+      "sha256": "92e20b359320481fc173c90eabeeb741e3a38f2f39d9b71d6052872894287434"
+    },
+    {
+      "path": "tests/apu_mixdown/test_main.c",
+      "bytes": 3124,
+      "sha256": "4ad7518f961f85769b654af00285cb336a0e5c209f0c0892f43f93473bd912f4"
+    },
+    {
+      "path": "tests/brute_force_cpu/CMakeLists.txt",
+      "bytes": 494,
+      "sha256": "d26f70ba11c71f1c2f410a08c3924a241dc10425a2e7d13688a91c7e17580de6"
+    },
+    {
+      "path": "tests/brute_force_cpu/cpu_test.c",
+      "bytes": 1205,
+      "sha256": "f6aa71bf2518b35cbb24d0d74349e743324e0a730b13eb4213dc3463afeb4b69"
+    },
+    {
+      "path": "tests/framebuffer_gpu/build/CMakeFiles/3.31.6-msvc6/CompilerIdC/CMakeCCompilerId.c",
+      "bytes": 28524,
+      "sha256": "980da23c61453fa1da0dbc5d11ea9dbb34deaa7210a24b1b6c5a007ad0b546a6"
+    },
+    {
+      "path": "tests/framebuffer_gpu/CMakeLists.txt",
+      "bytes": 610,
+      "sha256": "428f9c7dc422d445a2e5691511485a8c60ed37425a6030adbfe73c0beb3bae1f"
+    },
+    {
+      "path": "tests/framebuffer_gpu/test_main.c",
+      "bytes": 10492,
+      "sha256": "412154fcf916be26b44797f57f2cb08fcbd72166d5e4d4442473153a549436f2"
+    },
+    {
+      "path": "tests/framebuffer_input/build/CMakeFiles/3.31.6-msvc6/CompilerIdC/CMakeCCompilerId.c",
+      "bytes": 28524,
+      "sha256": "980da23c61453fa1da0dbc5d11ea9dbb34deaa7210a24b1b6c5a007ad0b546a6"
+    },
+    {
+      "path": "tests/framebuffer_input/CMakeLists.txt",
+      "bytes": 431,
+      "sha256": "1237edc5592e610d3b05bab4213e22ebd17dcb897ad55633dd76e12c45161b2a"
+    },
+    {
+      "path": "tests/framebuffer_input/test_main.c",
+      "bytes": 1969,
+      "sha256": "eaa8da615f1127d976da1f1b58952dc453922d74a13fc30b3c56dd1fae32a8df"
+    },
+    {
+      "path": "tests/kernel_handle_lifetime/CMakeLists.txt",
+      "bytes": 289,
+      "sha256": "7314641722f4bd97ae0edd696d1976f37d97f63a193658c927b11f6a5b50dfe2"
+    },
+    {
+      "path": "tests/kernel_handle_lifetime/handle_test.c",
+      "bytes": 1550,
+      "sha256": "29c34d7b38712a3973cd17d0a944ca16533b133289c7bc918901882a540978b7"
+    },
+    {
+      "path": "tests/kernel_save_paths/CMakeLists.txt",
+      "bytes": 381,
+      "sha256": "15fb9ca8b5e69302ac6d7126100abb1916f12a0ffb16b32ed5238051996a316f"
+    },
+    {
+      "path": "tests/kernel_save_paths/test_main.c",
+      "bytes": 2278,
+      "sha256": "d2debb5748fbdf84a18a43c92378ef85afc64a99e7a78a8fbeb50d1bb982eb0a"
+    },
+    {
+      "path": "tests/nv2a_clear/CMakeLists.txt",
+      "bytes": 787,
+      "sha256": "236a70b8607bd941bb3be7f80a23d68de7687e4e139ef02ed32ba41d375c9a08"
+    },
+    {
+      "path": "tests/nv2a_clear/nv2a_clear_test.c",
+      "bytes": 1521,
+      "sha256": "779ca34f441b9bda79cb80299be9802f9d13a0b8c241f1f1b259564b00440ed5"
+    },
+    {
+      "path": "tests/nv2a_clear/nv2a_clip_test.c",
+      "bytes": 1784,
+      "sha256": "4890097bf7e1832101054af6c0dee082ec34184016dc9e6b96295e59bac22431"
+    },
+    {
+      "path": "tests/nv2a_combiner/CMakeLists.txt",
+      "bytes": 404,
+      "sha256": "20108fb3be10c1ba10cfd9fa7782aae098e248a5f1db320c1144d7b738093908"
+    },
+    {
+      "path": "tests/nv2a_combiner/nv2a_combiner_test.c",
+      "bytes": 2739,
+      "sha256": "d84dcadec793d63d1d34db40a947c80bd7dc99bf56ac40154d1a07261486287b"
+    },
+    {
+      "path": "tests/nv2a_gpu/CMakeLists.txt",
+      "bytes": 1696,
+      "sha256": "04d01ac9614f3094a248f48656bd74a016d4695ac436d7afa414040a498c4e14"
+    },
+    {
+      "path": "tests/nv2a_gpu/combiner_gpu_test.c",
+      "bytes": 6753,
+      "sha256": "7f46194736da2a7979598e4835c61bb1a622f9ed801fc232ddf8cfcf8a1c3546"
+    },
+    {
+      "path": "tests/nv2a_gpu/device_probe.c",
+      "bytes": 2827,
+      "sha256": "badcefca37f8ee0ea3c691b2abaf46e9f838eeb8a2a372d8f6c65a07ade9572f"
+    },
+    {
+      "path": "tests/nv2a_gpu/raster_test.c",
+      "bytes": 21864,
+      "sha256": "c8ecbb689a8139873eb83975dbe0fae731cb298a60b6bd84cbd3f6c3cf8fd7d9"
+    },
+    {
+      "path": "tests/nv2a_gpu/vertex_gpu_test.c",
+      "bytes": 10721,
+      "sha256": "40e658d9fc0af48b37fbf2616a5127e63adadc8b078bc2b698943d312c102b6d"
+    },
+    {
+      "path": "tests/nv2a_pb_control/CMakeLists.txt",
+      "bytes": 295,
+      "sha256": "b8c8243726c8d88faa94965d60005639ae59d43a6d36be9b28a26126a8d9c76b"
+    },
+    {
+      "path": "tests/nv2a_pb_control/control_test.c",
+      "bytes": 5841,
+      "sha256": "b88290b215afd38cac39e33c58fc605ec5c3d62b98eeca5eb307279b674fb858"
+    },
+    {
+      "path": "tests/nv2a_semaphore/CMakeLists.txt",
+      "bytes": 719,
+      "sha256": "e8e0fda6a858b435ed64e5d251e78c43d493f06c228263f145f9ec238bc8eeb5"
+    },
+    {
+      "path": "tests/nv2a_semaphore/semaphore_test.c",
+      "bytes": 10659,
+      "sha256": "07a5a42f2d41973091470a25d62fb83c4d0fc8cf00e06eb46f05f194e6f33a3e"
+    },
+    {
+      "path": "tests/nv2a_vsh/CMakeLists.txt",
+      "bytes": 517,
+      "sha256": "3decaf9dee45e0ea89fed6d66c2dd9d863fa60184da6f68956256c8fd3889ee1"
+    },
+    {
+      "path": "tests/nv2a_vsh/nv2a_vsh_test.c",
+      "bytes": 4972,
+      "sha256": "0e30042b06d72a60d0e85247a2193606d50b7a07ebaf2d834dba8f3103ae17b5"
+    },
+    {
+      "path": "tests/xaudio2/CMakeLists.txt",
+      "bytes": 199,
+      "sha256": "1bdddabe5c6cab3c3a72cf9ea7dc5609f0f67be2a8a52e607ccd93d871daeda2"
+    },
+    {
+      "path": "tests/xaudio2/test_main.c",
+      "bytes": 7608,
+      "sha256": "0d7683a8124840a00b3a2db9a9e5d8176ad297226c70f50006564472a9847700"
+    },
+    {
+      "path": "tools/recomp/test_lahf_carry.py",
+      "bytes": 1330,
+      "sha256": "84842f6f5c10d9e368f034e6890f2c860f4349da98aedcbb5213e73997b9dba7"
+    },
+    {
+      "path": "tools/recomp/test_static_callback_cache.py",
+      "bytes": 2215,
+      "sha256": "d7043616974cfa98dc1519673cc81899b25928c89b77f9519931fed54883e5e9"
+    },
+    {
+      "path": "tools/recomp/translator.py",
+      "bytes": 160754,
+      "sha256": "2b7375176214a29bd6cc9b95acf63c497f137557d09b41310cf3ca5dbea0d712"
+    }
+  ]
+}

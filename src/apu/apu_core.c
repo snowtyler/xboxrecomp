@@ -298,8 +298,7 @@ static struct {
 
 /* Ring of waveOut buffers for double-buffering */
 #define WAVEOUT_NUM_BUFS 4
-#define WAVEOUT_BUF_SAMPLES 2048  /* ~42.7ms at 48kHz, matches 8-frame delivery rate */
-#define MIXER_FRAME_SAMPLES 256  /* Internal mixing frame size (matches frame_buf) */
+#define WAVEOUT_BUF_SAMPLES 256  /* Eight 32-sample subframes, 5.33ms at 48kHz */
 
 typedef struct {
     HWAVEOUT hwo;
@@ -377,98 +376,75 @@ void mcpx_apu_monitor_finalize(MCPXAPUState *d)
             g_waveout.frames_written);
 }
 
+/* Prepare exactly the 256 samples produced by eight VP/EP subframes.
+ * Keep hardware PCM intact; software voices accumulate into a private copy. */
+int mcpx_apu_monitor_render(MCPXAPUState *d, int16_t output[256][2])
+{
+    uint32_t sectl=qatomic_read(&d->regs[NV_PAPU_SECTL]);
+    uint32_t fectl=qatomic_read(&d->regs[NV_PAPU_FECTL]);
+    int hardware=(sectl&NV_PAPU_SECTL_XCNTMODE)!=NV_PAPU_SECTL_XCNTMODE_OFF &&
+        !(fectl&(NV_PAPU_FECTL_FEMETHMODE_TRAPPED|NV_PAPU_FECTL_FEMETHMODE_HALTED));
+    if(hardware&&!g_test_tone.active&&!g_audio_muted)
+        memcpy(output,d->monitor.frame_buf,sizeof d->monitor.frame_buf);
+    else memset(output,0,sizeof d->monitor.frame_buf);
+    if(g_test_tone.active&&!g_audio_muted)for(int i=0;i<256;i++) {
+        int16_t sample=(int16_t)(sin(g_test_tone.phase)*g_test_tone.amplitude);
+        output[i][0]=output[i][1]=sample;
+        g_test_tone.phase+=g_test_tone.phase_inc;
+        if(g_test_tone.phase>=2.0*M_PI)g_test_tone.phase-=2.0*M_PI;
+    }
+    if(!g_audio_muted)mixer_render(output,256);
+    return 256;
+}
+
+static void monitor_trace(const int16_t output[256][2])
+{
+    static int initialized,trace;static FILE *dump;
+    static uint64_t frames,nonzero;static unsigned peak;
+    if(!initialized) {
+        const char *path=getenv("RECOMP_AUDIO_DUMP");
+        initialized=1;trace=getenv("RECOMP_AUDIO_TRACE")!=NULL;
+        if(path&&*path)dump=fopen(path,"wb");
+    }
+    if(dump)fwrite(output,sizeof(int16_t)*2,256,dump);
+    if(!trace)return;
+    for(int i=0;i<256;i++)for(int c=0;c<2;c++) {
+        unsigned amplitude=output[i][c]<0?-(int)output[i][c]:output[i][c];
+        if(amplitude)++nonzero;if(amplitude>peak)peak=amplitude;
+    }
+    if(++frames%128==0) {
+        fprintf(stderr,"[AUDIO PCM] frames=%llu samples=%llu nonzero=%llu peak=%u\n",
+            (unsigned long long)frames,(unsigned long long)(frames*256),
+            (unsigned long long)nonzero,peak);
+        if(dump)fflush(dump);
+    }
+}
+
 void mcpx_apu_monitor_frame(MCPXAPUState *d)
 {
-    if ((d->ep_frame_div + 1) % 8) {
+    if((d->ep_frame_div+1)%8)return;
+    if(!xa2_is_active()&&!g_waveout.initialized)return;
+    int16_t output[256][2];
+    mcpx_apu_monitor_render(d,output);
+    monitor_trace(output);
+    if(xa2_is_active()) {
+        xa2_submit_samples((const int16_t*)output,256);
         return;
     }
-
-    /* XAudio2 path: render and submit a buffer */
-    if (xa2_is_active()) {
-        int buf_size = xa2_get_buffer_size();
-        int16_t xa2_tmp[1024][2];  /* matches XA2_BUF_SAMPLES max */
-        int remaining = buf_size;
-        int out_offset = 0;
-
-        while (remaining > 0) {
-            int chunk = (remaining < MIXER_FRAME_SAMPLES) ? remaining : MIXER_FRAME_SAMPLES;
-            memset(d->monitor.frame_buf, 0, sizeof(d->monitor.frame_buf));
-
-            if (g_test_tone.active && !g_audio_muted) {
-                for (int i = 0; i < chunk; i++) {
-                    int16_t s = (int16_t)(sin(g_test_tone.phase) * g_test_tone.amplitude);
-                    d->monitor.frame_buf[i][0] = s;
-                    d->monitor.frame_buf[i][1] = s;
-                    g_test_tone.phase += g_test_tone.phase_inc;
-                    if (g_test_tone.phase >= 2.0 * M_PI)
-                        g_test_tone.phase -= 2.0 * M_PI;
-                }
-            }
-
-            if (!g_audio_muted)
-                mixer_render(d->monitor.frame_buf, chunk);
-
-            memcpy(xa2_tmp + out_offset, d->monitor.frame_buf, chunk * 2 * sizeof(int16_t));
-            out_offset += chunk;
-            remaining -= chunk;
-        }
-
-        xa2_submit_samples((const int16_t *)xa2_tmp, buf_size);
-        return;
+    /* The waveOut fallback has no separate mastering voice. Silence only
+     * the submitted copy, after console processing and position updates. */
+    if(getenv("RECOMP_AUDIO_MUTE"))memset(output,0,sizeof(output));
+    int idx=g_waveout.next_buf;
+    WAVEHDR *hdr=&g_waveout.hdrs[idx];int wait_loops=0;
+    while(!(hdr->dwFlags&WHDR_DONE)&&(hdr->dwFlags&WHDR_INQUEUE)) {
+        qemu_mutex_unlock(&d->lock);Sleep(1);qemu_mutex_lock(&d->lock);
+        if(++wait_loops>50)break;
     }
-
-    if (!g_waveout.initialized) return;
-
-    int idx = g_waveout.next_buf;
-    WAVEHDR *hdr = &g_waveout.hdrs[idx];
-
-    /* Wait if this buffer is still playing (with timeout) */
-    int wait_loops = 0;
-    while (!(hdr->dwFlags & WHDR_DONE) && (hdr->dwFlags & WHDR_INQUEUE)) {
-        qemu_mutex_unlock(&d->lock);
-        Sleep(1);
-        qemu_mutex_lock(&d->lock);
-        if (++wait_loops > 50) break;
-    }
-
-    /* Fill the large waveOut buffer by rendering multiple 256-sample frames */
-    int16_t *out = (int16_t *)g_waveout.bufs[idx];
-    int remaining = WAVEOUT_BUF_SAMPLES;
-    int out_offset = 0;
-
-    while (remaining > 0) {
-        int chunk = (remaining < MIXER_FRAME_SAMPLES) ? remaining : MIXER_FRAME_SAMPLES;
-
-        memset(d->monitor.frame_buf, 0, sizeof(d->monitor.frame_buf));
-
-        /* Test tone (skip if muted) */
-        if (g_test_tone.active && !g_audio_muted) {
-            for (int i = 0; i < chunk; i++) {
-                int16_t s = (int16_t)(sin(g_test_tone.phase) * g_test_tone.amplitude);
-                d->monitor.frame_buf[i][0] = s;
-                d->monitor.frame_buf[i][1] = s;
-                g_test_tone.phase += g_test_tone.phase_inc;
-                if (g_test_tone.phase >= 2.0 * M_PI)
-                    g_test_tone.phase -= 2.0 * M_PI;
-            }
-        }
-
-        /* Mix software voices (skip if muted) */
-        if (!g_audio_muted)
-            mixer_render(d->monitor.frame_buf, chunk);
-
-        /* Copy to waveOut buffer */
-        memcpy(out + out_offset * 2, d->monitor.frame_buf, chunk * 2 * sizeof(int16_t));
-        out_offset += chunk;
-        remaining -= chunk;
-    }
-
-    /* Submit to waveOut */
-    hdr->dwFlags &= ~WHDR_DONE;
-    waveOutWrite(g_waveout.hwo, hdr, sizeof(WAVEHDR));
-
-    g_waveout.next_buf = (idx + 1) % WAVEOUT_NUM_BUFS;
-    g_waveout.frames_written++;
+    memcpy(g_waveout.bufs[idx],output,sizeof output);
+    hdr->dwBufferLength=sizeof output;hdr->dwFlags&=~WHDR_DONE;
+    waveOutWrite(g_waveout.hwo,hdr,sizeof(WAVEHDR));
+    g_waveout.next_buf=(idx+1)%WAVEOUT_NUM_BUFS;
+    ++g_waveout.frames_written;
 }
 
 /* ============================================================

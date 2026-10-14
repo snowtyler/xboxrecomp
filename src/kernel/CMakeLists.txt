@@ -26,7 +26,10 @@ set(KERNEL_SOURCES
     nv2a_pb_scan.c
     nv2a_pb_exec.c
     nv2a_vsh_interp.c
+    nv2a_vsh_hlsl.c
     nv2a_combiner.c
+    nv2a_combiner_hlsl.c
+    nv2a_hw_raster.c
 )
 
 add_library(xbox_kernel STATIC ${KERNEL_SOURCES})
@@ -43,7 +46,7 @@ target_include_directories(xbox_kernel PUBLIC
 if(WIN32)
     # platform is an INTERFACE target on Windows: it contributes the src/
     # include path that "platform/xbox_winnt.h" resolves against.
-    target_link_libraries(xbox_kernel PUBLIC platform kernel32 bcrypt)
+    target_link_libraries(xbox_kernel PUBLIC platform kernel32 bcrypt d3d11 d3dcompiler dxgi dxguid)
 else()
     # Linux: platform layer (POSIX host primitives) + OpenSSL for crypto.
     find_package(OpenSSL REQUIRED)

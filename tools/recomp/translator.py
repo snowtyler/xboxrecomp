@@ -482,6 +482,7 @@ class FunctionTranslator:
         self.protected_function_starts = set()
         self.jump_table_entry_starts = set()
         self._recovered_cfg = {}
+        self._static_callback_ranges = {}
         self._ownership_ready = False
 
     def discover_static_indirect_targets(self, *, coalescing=False):
@@ -495,13 +496,22 @@ class FunctionTranslator:
             if recovered and recovered.get("instructions"):
                 end = recovered.get("end", end)
                 instructions = recovered["instructions"]
+                ranges = self._find_static_indirect_ranges(instructions)
             else:
-                raw_bytes = self._read_func_bytes(caller, end)
-                if not raw_bytes:
-                    continue
-                instructions = self.disasm.disassemble_function(
-                    raw_bytes, caller, end)
-            for lower, upper in self._find_static_indirect_ranges(instructions):
+                cached = self._static_callback_ranges.get(caller)
+                if cached is not None and cached[0] == end:
+                    ranges = cached[1]
+                else:
+                    raw_bytes = self._read_func_bytes(caller, end)
+                    if not raw_bytes:
+                        continue
+                    instructions = self.disasm.disassemble_function(
+                        raw_bytes, caller, end)
+                    ranges = tuple(self._find_static_indirect_ranges(instructions))
+                    self._static_callback_ranges[caller] = (end, ranges)
+            # Cache only immutable body analysis, not table contents or target
+            # evidence: coalescence can change the known function starts.
+            for lower, upper in ranges:
                 targets = self._read_static_callback_table(
                     lower, upper, original_starts)
                 if targets is None:
@@ -1375,7 +1385,9 @@ class FunctionTranslator:
         last_setter = None
         for insn in instructions:
             m = insn.mnemonic
-            if m in ("adc", "sbb", "stc", "clc", "cmc", "rcl", "rcr"):
+            # LAHF's AH snapshot also reads carry. Without tracking it,
+            # arithmetic + LAHF emits an undeclared _cf and omits its updates.
+            if m in ("adc", "sbb", "stc", "clc", "cmc", "rcl", "rcr", "lahf"):
                 return True
             cc = None
             if m.startswith("j") and len(m) > 1:
@@ -3264,8 +3276,8 @@ class BatchTranslator:
         lines.extend([
             "};",
             "",
-            f"static const size_t g_recomp_table_size = "
-            f"{len(translations)};",
+            "static const size_t g_recomp_table_size = "
+            "sizeof(g_recomp_table) / sizeof(g_recomp_table[0]);",
             "",
             "/* ----------------------------------------------------------------",
             " * Flat, directly-indexed dispatch.",

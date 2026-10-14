@@ -11,6 +11,8 @@
 
 static HRESULT com_result, create_result, master_result, source_result;
 static HRESULT start_result, submit_result;
+static HRESULT volume_result;
+static int volume_calls;
 static int com_refs, releases, master_destroys, source_destroys, failures;
 static IXAudio2 engine;
 static IXAudio2MasteringVoice master;
@@ -53,6 +55,12 @@ static void STDMETHODCALLTYPE destroy_master(IXAudio2MasteringVoice *voice)
 {
     CHECK(voice == &master);
     master_destroys++;
+}
+static HRESULT STDMETHODCALLTYPE master_volume(IXAudio2MasteringVoice *voice,float value,UINT32 operation)
+{
+    CHECK(voice==&master && value==0.0f && operation==XAUDIO2_COMMIT_NOW);
+    volume_calls++;
+    return volume_result;
 }
 
 static void STDMETHODCALLTYPE destroy_source(IXAudio2SourceVoice *voice)
@@ -120,6 +128,8 @@ static void reset(void)
     queue_count = 0;
     com_result = create_result = master_result = source_result = S_OK;
     start_result = submit_result = S_OK;
+    volume_result=S_OK;volume_calls=0;
+    _putenv_s("RECOMP_AUDIO_MUTE","");
 }
 
 static void check_init_failures(HRESULT com_hr)
@@ -144,6 +154,7 @@ static void check_init_failures(HRESULT com_hr)
 int main(void)
 {
     master_vtable.DestroyVoice = destroy_master;
+    master_vtable.SetVolume=master_volume;
     source_vtable.DestroyVoice = destroy_source;
     master.lpVtbl = &master_vtable;
     source.lpVtbl = &source_vtable;
@@ -159,7 +170,8 @@ int main(void)
     CHECK(xa2_init() == 1 && com_refs == 1);
     int16_t samples[1024][2];
     memset(samples, 1, sizeof(samples));
-    CHECK(xa2_submit_samples(&samples[0][0], 1024) == 1);
+    CHECK(xa2_submit_samples(&samples[0][0], 256) == 1);
+    CHECK(queued_bytes[0] == 256 * 2 * sizeof(int16_t));
     submit_result = E_FAIL;
     for (int i = 0; i < 3; i++) {
         memset(samples, 2 + i, sizeof(samples));
@@ -188,6 +200,16 @@ int main(void)
     CHECK(master_destroys == 1 && source_destroys == 1);
     xa2_shutdown();
     CHECK(releases == 1 && master_destroys == 1 && source_destroys == 1);
+    reset();_putenv_s("RECOMP_AUDIO_MUTE","1");
+    volume_result=E_FAIL;
+    CHECK(xa2_init()==0 && !xa2_is_active());
+    CHECK(volume_calls==1 && master_destroys==1 && source_destroys==0 && releases==1 && com_refs==0);
+    reset();_putenv_s("RECOMP_AUDIO_MUTE","1");
+    CHECK(xa2_init()==1 && volume_calls==1);
+    memset(samples,7,sizeof(samples));
+    CHECK(xa2_submit_samples(&samples[0][0],256)==1);
+    CHECK(memcmp(queued[0],samples,256*2*sizeof(int16_t))==0);
+    check_queued();xa2_shutdown();_putenv_s("RECOMP_AUDIO_MUTE","");
     printf("XAudio2 regression: %d failures\n", failures);
     return failures ? 1 : 0;
 }

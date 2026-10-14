@@ -524,6 +524,9 @@ void mcpx_apu_vp_reset(MCPXAPUState *d);
 void mcpx_apu_dsp_init(MCPXAPUState *d);
 void mcpx_apu_update_dsp_preference(MCPXAPUState *d);
 void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME]);
+/* One complete 256-sample EP frame, preserving hardware PCM and mixing any
+ * software voices at the same 48 kHz rate. Does not touch the output device. */
+int mcpx_apu_monitor_render(MCPXAPUState *d, int16_t output[256][2]);
 void mcpx_apu_dsp_ack_poll(MCPXAPUState *d);
 
 /* Debug globals */

@@ -175,7 +175,7 @@ int xbox_Nv2aMirrorCounter(uint32_t device_ptr_va,
 
 int xbox_Nv2aFrameCounter(uint32_t device_ptr_va, uint32_t counter_off);
 /* Advance those counters now, because a swap really completed. Called by the
- * pushbuffer executor on FLIP_STALL; while these arrive the 60 Hz fallback
+ * pushbuffer executor on FLIP_INCREMENT_WRITE; while these arrive the 60 Hz fallback
  * stands down, so the count follows what was actually drawn. */
 void xbox_Nv2aFrameCounterFlip(void);
 
@@ -191,6 +191,17 @@ uint32_t xbox_ContiguousAllocatedBytes(void);
 
 int xbox_Nv2aMirrorFence(uint32_t device_ptr_va,
                          uint32_t put_off, uint32_t get_ptr_off);
+/* Bind a semaphore DMA context to a bounded guest buffer found through an SDK
+ * device pointer. Releases happen when the command executor reaches them. */
+int xbox_Nv2aBindSemaphore(uint32_t context, uint32_t device_ptr_va,
+                          uint32_t buffer_ptr_off, uint32_t bytes);
+int xbox_Nv2aReleaseSemaphore(uint32_t context, uint32_t offset, uint32_t value);
+void xbox_Nv2aFenceBatchBegin(void);
+int xbox_Nv2aFenceBatchActive(void);
+int xbox_Nv2aFenceBatchHasRelease(void);
+void xbox_Nv2aFenceBatchFail(void);
+void xbox_Nv2aFenceBatchEnd(int commit);
+void xbox_Nv2aBindRing(uint32_t device_ptr_va,uint32_t low_offset,uint32_t high_offset);
 
 void xbox_MemoryLayoutShutdown(void);
 
@@ -508,4 +519,13 @@ void  *xbox_thread_debug_handle(void); /* the game thread, or NULL under inline 
 #define XBOX_THREAD_MODE_SPAWN  1
 void xbox_SetThreadMode(int mode);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+void xbox_Nv2aRaiseInterruptBits(uint32_t offset, uint32_t bits);
+int xbox_Nv2aFenceBatchFlush(void);
+void xbox_Nv2aWriteRegister(uint32_t offset, uint32_t value);
+#ifdef __cplusplus
+}
+#endif
 #endif /* XBOX_MEMORY_LAYOUT_H */
