@@ -16,6 +16,7 @@
 #include "kernel.h"
 #include "guest_vmem.h"
 #include "nv2a_hw_raster.h"
+#include "nv2a_order_trace.h"
 #include "../video/fb_gpu_present.h"
 #include "../platform/mmio_decode.h"
 #include <stdio.h>
@@ -722,25 +723,33 @@ int xbox_Nv2aFenceBatchActive(void)
 }
 void xbox_Nv2aFenceBatchFail(void)
 {
-    if(g_fence_batch_depth)g_fence_batch_failed=1;
+    if(g_fence_batch_depth) {
+        if(!g_fence_batch_failed)fprintf(stderr,"[HW FENCE] batch failed depth=%u pending=%u\n",g_fence_batch_depth,g_pending_fence_count);
+        nv2a_order_trace(NV_ORDER_BATCH_FAIL,1,g_fence_batch_depth,g_pending_fence_count,0);
+        g_fence_batch_failed=1;
+    }
 }
 int xbox_Nv2aFenceBatchFlush(void)
 {
     /* Never acknowledge a rejected prefix, including a release-list overflow.
      * Flushing to make room would let the CPU reuse commands still unread. */
-    if(g_fence_batch_failed)return 0;
-    for(unsigned i=0;i<g_pending_fence_count;i++)
+    if(g_fence_batch_failed){fprintf(stderr,"[HW FENCE] rejected trap flush pending=%u\n",g_pending_fence_count);nv2a_order_trace(NV_ORDER_BATCH_FAIL,2,g_fence_batch_depth,g_pending_fence_count,0);return 0;}
+    for(unsigned i=0;i<g_pending_fence_count;i++) {
         *(volatile uint32_t*)((uintptr_t)g_pending_fences[i].target+g_memory_offset)=g_pending_fences[i].value;
+        nv2a_order_trace(NV_ORDER_PUBLISH,g_pending_fences[i].target,g_pending_fences[i].value,1,0);
+    }
     g_pending_fence_count=0;
     return 1;
 }
 void xbox_Nv2aFenceBatchEnd(int commit)
 {
     if(!g_fence_batch_depth)return;
-    if(!commit)g_fence_batch_failed=1;
+    if(!commit){fprintf(stderr,"[HW FENCE] rejected batch end pending=%u\n",g_pending_fence_count);nv2a_order_trace(NV_ORDER_BATCH_FAIL,3,g_fence_batch_depth,g_pending_fence_count,0);g_fence_batch_failed=1;}
     if(--g_fence_batch_depth)return;
-    if(!g_fence_batch_failed)for(unsigned i=0;i<g_pending_fence_count;i++)
+    if(!g_fence_batch_failed)for(unsigned i=0;i<g_pending_fence_count;i++) {
         *(volatile uint32_t*)((uintptr_t)g_pending_fences[i].target+g_memory_offset)=g_pending_fences[i].value;
+        nv2a_order_trace(NV_ORDER_PUBLISH,g_pending_fences[i].target,g_pending_fences[i].value,0,0);
+    }
     g_pending_fence_count=0;
     g_fence_batch_failed=0;
 }
@@ -816,6 +825,7 @@ int xbox_Nv2aReleaseSemaphore(uint32_t context, uint32_t offset, uint32_t value)
         buffer = *(volatile uint32_t *)((uintptr_t)slot + g_memory_offset);
         target = (uint64_t)buffer + offset;
         if (target > UINT32_MAX || !fence_readable((uint32_t)target, 4)) continue;
+        nv2a_order_trace(NV_ORDER_RELEASE,(uint32_t)target,value,g_fence_batch_depth,*(volatile uint32_t*)((uintptr_t)target+g_memory_offset));
         if(g_fence_batch_depth) {
             unsigned j;
             for(j=0;j<g_pending_fence_count;j++)if(g_pending_fences[j].target==(uint32_t)target)break;
@@ -1154,6 +1164,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
             uint32_t put = *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_PUT);
             submitted=put!=last_put;
             if (put != last_put || (now_ms - last_put_ms) > 2000) {
+                if(put!=last_put)nv2a_order_trace(NV_ORDER_PUT,last_put,put,*(volatile uint32_t*)((char*)regs+NV2A_USER_DMA_GET),0);
                 /* Survey the segment the title just submitted, once. */
                 {
                     extern void nv2a_pb_scan(uint32_t, uint32_t);

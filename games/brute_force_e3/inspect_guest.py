@@ -77,15 +77,18 @@ t=None
 try:
     for name in ['g_memory_offset','g_state','g_nv2a_notify_pending','g_nv2a_memory',
                  'g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed','g_pending_fences',
-                 's_irq_line','g_irql_raised_count','_tls_index','g_eax','g_ecx','g_edx','g_esp','g_esi','g_edi']:
+                 's_irq_line','g_irql_raised_count','_tls_index','g_eax','g_ecx','g_edx','g_esp','g_ebp','g_esi','g_edi']:
         try:result['symbols'][name]=sym(name)
         except OSError as e:result['symbols'][name]={'error':str(e)}
     offset=uint(result['symbols']['g_memory_offset']['address'],8)
     dev=uint(offset+0x003AB378);result['guest']['device']=hex(dev)
     if dev:
-        result['guest']['device_fields']={hex(x):hex(uint(offset+dev+x)) for x in [0x2c,0x30,0x196c,0x1970]}
+        result['guest']['device_fields']={hex(x):hex(uint(offset+dev+x)) for x in [0,4,0x24,0x28,0x2c,0x30,0x17c0,0x196c,0x1970]}
         fence=uint(offset+dev+0x30)
         if fence:result['guest']['fence']=hex(uint(offset+fence))
+        result['guest']['fence_records']=[{'serial':hex(uint(offset+dev+0x4c+i*12)),
+            'command':hex(uint(offset+dev+0x50+i*12)),
+            'position':hex(uint(offset+dev+0x54+i*12))} for i in range(64)]
     t=k.OpenThread(0x40,False,a.tid)
     basic=c.create_string_buffer(48);n.NtQueryInformationThread.argtypes=[w.HANDLE,c.c_int,c.c_void_p,w.ULONG,c.c_void_p]
     if not t or n.NtQueryInformationThread(t,0,basic,48,None)!=0:raise RuntimeError('Thread info unavailable')
@@ -111,8 +114,31 @@ try:
     except Exception as error:
         gpu['inspection_error']=str(error)
     result['gpu']=gpu
+    if dev and 'registers' in gpu:
+        try:
+            low,high,writer=[uint(offset+dev+x) for x in [0x24,0x28,0]]
+            put=int(gpu['registers']['DMA_PUT'],16)|0x80000000
+            tail={'put_va':hex(put),'writer_va':hex(writer),'low':hex(low),'high':hex(high),'segments':[]}
+            if 0x80000000<=low<high<=0x88000000 and low<=put<=high and low<=writer<=high:
+                ranges=[(put,writer)] if writer>=put else [(put,high),(low,writer)]
+                budget=65536
+                for begin,end in ranges:
+                    size=min(end-begin,budget)&~3
+                    tail['segments'].append({'begin':hex(begin),'end':hex(end),'captured_bytes':size,
+                        'words':[hex(int.from_bytes(data,'little')) for data in
+                                 [read(offset+begin+i,4) for i in range(0,size,4)]]})
+                    budget-=size
+                tail['truncated']=any(s['captured_bytes']!=int(s['end'],16)-int(s['begin'],16) for s in tail['segments'])
+            else:tail['range_error']='Bounds do not identify a mapped contiguous ring'
+            result['gpu']['unsubmitted_tail']=tail
+            if 0x80000000<=low<high<=0x88000000 and low<=put<=high:
+                size=min(65536,put-low)&~3
+                payload=read(offset+put-size,size)
+                result['gpu']['submitted_suffix']={'begin':hex(put-size),'end':hex(put),
+                    'words':[hex(int.from_bytes(payload[i:i+4],'little')) for i in range(0,size,4)]}
+        except Exception as error:result['gpu']['ring_inspection_error']=str(error)
     regs={}
-    for name in ['g_eax','g_ecx','g_edx','g_esp','g_esi','g_edi']:
+    for name in ['g_eax','g_ecx','g_edx','g_esp','g_ebp','g_esi','g_edi']:
         s=result['symbols'][name]
         if s.get('flags',0)&0x4000:regs[name]=uint(tls+s['address'])
     result['guest']['registers']={key:hex(value) for key,value in regs.items()}

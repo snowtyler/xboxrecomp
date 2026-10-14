@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $disabledTask = @('RECOMP_AUDIO_MUTE','RECOMP_NV2A_PFB_POLL','RECOMP_HW_RELEASE_COALESCE',
                   'RECOMP_HW_RELEASE_BARRIER','RECOMP_HW_TEXTURE_HASH','RECOMP_HW_GPU_TRACE',
-                  'RECOMP_GPU_TIMING','RECOMP_HW_COUNTERS')
+                  'RECOMP_GPU_TIMING','RECOMP_HW_COUNTERS','RECOMP_NV2A_IRQ_GATE',
+                  'RECOMP_NV2A_ORDER_TRACE')
 $originalTask = @{}
 $captureHolderTask = [pscustomobject]@{ Environment=$null }
 foreach ($keyTask in $disabledTask + @('RECOMP_HW_TEXTURE_EPOCH')) {

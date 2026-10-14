@@ -44,6 +44,7 @@
 #include <ctype.h>
 #include <wctype.h>
 #include "bridge_guest_handles.h"
+#include "nv2a_order_trace.h"
 static BridgeHandleTable s_guest_handles;
 static BridgeHandleLease bridge_acquire_wait_handle(uint32_t token);
 static void bridge_release_wait_handle(BridgeHandleLease lease);
@@ -80,6 +81,7 @@ void xbox_DebugEventTrace(uint32_t object,uint32_t kind)
     static uint32_t target;static int initialized;
     if(!initialized){const char *e=getenv("RECOMP_EVENT_TRACE");target=e?(uint32_t)strtoul(e,NULL,0):0;initialized=1;}
     if(!target || object!=target)return;
+    nv2a_order_trace(NV_ORDER_EVENT,object,kind,BRIDGE_MEM32(object+4),g_esp?BRIDGE_MEM32(g_esp):0);
     unsigned i=(unsigned)InterlockedIncrement(&s_event_trace_index)-1;
     i&=63;s_event_trace[i].tid=GetCurrentThreadId();s_event_trace[i].time=GetTickCount64();
     s_event_trace[i].kind=kind;s_event_trace[i].state=BRIDGE_MEM32(object+4);
@@ -1561,6 +1563,7 @@ static void bridge_KeSetEvent(void)
             g_eax = BRIDGE_MEM32(guest_va + 4) != 0;   /* previous state */
             BRIDGE_MEM32(guest_va + 4) = 1;
             SetEvent(ge);
+            xbox_DebugEventTrace(guest_va,4);
             return;
         }
     }
@@ -1594,6 +1597,7 @@ static void bridge_KeWaitForSingleObject(void)
         if (ge) {
             if (BRIDGE_MEM32(object + 4) == 0) {
                 ResetEvent(ge);
+                xbox_DebugEventTrace(object,5);
                 if (BRIDGE_MEM32(object + 4) != 0)     /* set meanwhile */
                     SetEvent(ge);
             } else {
@@ -2265,12 +2269,26 @@ static int kernel_raise_interrupt(uint32_t vector)
     if (!fn)
         return -1;
 
+    /* Experimental parity with APU/OHCI: keep the level-triggered source
+     * pending while guest IRQL masks delivery. This precheck does not serialize
+     * a concurrent raise after the check; the diagnostic timeline records it. */
+    static int nv2a_gate=-1;
+    if(nv2a_gate<0)nv2a_gate=getenv("RECOMP_NV2A_IRQ_GATE")!=NULL;
+    if(vector==3 && nv2a_gate && xbox_IrqlBlocksInterrupts()) {
+        nv2a_order_trace(NV_ORDER_IRQ,vector,0,xbox_IrqlRaisedCount(),0);
+        return -2;
+    }
+    nv2a_order_trace(NV_ORDER_IRQ,vector,1,xbox_IrqlRaisedCount(),routine);
+
     g_esp -= 4; BRIDGE_MEM32(g_esp) = context;
     g_esp -= 4; BRIDGE_MEM32(g_esp) = kint;
     g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
     { int _irql = xbox_IrqlEnterInterrupt(16); fn(); xbox_IrqlLeaveInterrupt(_irql); }
     return (int)(g_eax & 1u);
 }
+#ifdef NV2A_IRQ_GATE_TEST
+int xbox_TestNv2aRaiseInterrupt(void) {return kernel_raise_interrupt(3);}
+#endif
 
 /* The GPU's vertical blank, delivered rather than merely enabled.
  *
@@ -2315,10 +2333,12 @@ int xbox_Nv2aSoftwareNotify(uint32_t subchannel,uint32_t parameter)
     if(!InitOnceExecuteOnce(&g_nv2a_notify_once,kernel_nv2a_notify_init,NULL,NULL))return 0;
     g_nv2a_notify_subchannel=subchannel;g_nv2a_notify_parameter=parameter;
     InterlockedExchange(&g_nv2a_notify_pending,1);
+    nv2a_order_trace(NV_ORDER_NOTIFY,1,subchannel,parameter,0);
     /* The FIFO pauses until the timer thread has serviced the trapped method.
      * That thread owns the guest stack needed by the original ISR and DPC. */
     SetEvent(g_nv2a_notify_wake);
     WaitForSingleObject(g_nv2a_notify_done,INFINITE);
+    nv2a_order_trace(NV_ORDER_NOTIFY,3,subchannel,parameter,0);
     return 1;
 }
 static void kernel_nv2a_notify_tick(void)
@@ -2331,6 +2351,7 @@ static void kernel_nv2a_notify_tick(void)
         xbox_Nv2aRaiseInterruptBits(0x400100,1u<<20);
         xbox_Nv2aRaiseInterruptBits(0x100,1u<<12);
         InterlockedExchange(&g_nv2a_notify_pending,2);
+        nv2a_order_trace(NV_ORDER_NOTIFY,2,g_nv2a_notify_subchannel,g_nv2a_notify_parameter,0);
     }
     int claimed=kernel_raise_interrupt(NV2A_VECTOR);
     static unsigned shown;
@@ -2341,6 +2362,7 @@ static void kernel_nv2a_notify_complete(void)
     if(InterlockedCompareExchange(&g_nv2a_notify_pending,0,0)==2 &&
        !(BRIDGE_MEM32(XBOX_NV2A_REG_BASE+0x400100)&(1u<<20))) {
         InterlockedExchange(&g_nv2a_notify_pending,0);
+        nv2a_order_trace(NV_ORDER_NOTIFY,0,g_nv2a_notify_subchannel,g_nv2a_notify_parameter,0);
         SetEvent(g_nv2a_notify_done);
     }
 }

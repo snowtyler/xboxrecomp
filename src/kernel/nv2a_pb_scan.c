@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nv2a_hw_raster.h"
+#include "nv2a_order_trace.h"
 
 #ifndef XBOX_CONTIG_BASE
 #define XBOX_CONTIG_BASE 0x80000000u   /* physical P is at this + P */
@@ -261,6 +262,8 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
             if(!pb_readable(va,4)){pb_reject(unknown);return words;}
             if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);return words;}
             uint32_t m=noninc?method:method+i*4,parameter=*(const uint32_t*)(mem+va);va+=4;words++;
+            if(subch==0 && ((m==0x100&&parameter)||m==0x1D70))
+                nv2a_order_trace(NV_ORDER_COMMAND,va-4,m,parameter,0);
             note(subch,m);if(s_exec_enabled)nv2a_pb_exec_method(subch,m,parameter);
             if(subch==0&&m==0x100)s_last_nop=parameter;
             /* SDK 0x0039C333 emits a NOP marker, a linked-list word, then a

@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(nv2a_pb_control C)
-add_executable(nv2a-pb-control-test control_test.c ../../src/kernel/nv2a_pb_scan.c)
+add_executable(nv2a-pb-control-test control_test.c ../../src/kernel/nv2a_pb_scan.c
+    ../../src/kernel/nv2a_order_trace.c)
 target_compile_options(nv2a-pb-control-test PRIVATE /UNDEBUG)
 enable_testing()
 add_test(NAME nv2a-pushbuffer-control COMMAND nv2a-pb-control-test)

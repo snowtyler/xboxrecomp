@@ -4,6 +4,45 @@ Planning baseline: October 14, 2026. This is a proposed sequence, not enabled
 behavior or a promised speedup. Candidate149 and its existing evidence remain
 frozen; the corrected launcher has not changed the executable.
 
+### October 14 review update: diagnose coalescing first
+
+Claude's `review/opus55/ANSWERS_RESPONSE.md` moves the coalescing stall ahead of
+the general gameplay profile below. The epoch-on counters attribute 19.36 of
+41.52 ms/frame to release synchronization, so this is the largest measured
+opportunity. The proposed 10–15 ms saving remains an estimate.
+
+The immediate sequence is:
+
+1. Audit the original wait and action-5 handler, then collect an ordered trace
+   of the event, IRQL, trap, interrupt, observed PUT, release and publication.
+2. Compare release-only coalescing with the current interrupt behavior and an
+   optional NV2A IRQL gate, three short runs of each on the same binary. Add
+   CLI/STI modeling only if the guest path demonstrates a need for it.
+3. At a reproduced stall, compare the release/NOP addresses against submitted
+   PUT and inspect the unsubmitted ring tail. A watchdog exit alone proves
+   neither a fixed lost wakeup nor correct rendering.
+4. If the trace establishes a gating fix, qualify gating with normal barriers
+   through the full gameplay/replay gates, then qualify coalescing on top.
+5. Resume vblank interval measurement, gameplay CPU profiling, and target
+   retention/residency work after that correctness decision.
+
+Candidate150 is an opt-in diagnostic build for steps 1–3; the default launcher
+keeps interrupt gating and coalescing off. The direct wait routine clears the
+event before emitting NOP 5, and the audited wait/action-5 routines contain no
+CLI/STI or direct IRQL calls. The proposed masked-interrupt race therefore
+needs runtime evidence rather than being treated as established.
+
+The six candidate150 runs are now reviewed in
+`review/opus55/IRQ_FOLLOW_UP.md`: three controls progressed, two gated runs
+progressed, and one gated run stalled at about 102 seconds. The failed trace
+has no final action-5 command or event set; its waited release was published.
+The executor passed the reserved trap location before the guest armed it while
+DMA GET still reported the old segment boundary. The next candidate should
+test conservative within-segment GET progress, with command-consumption and
+completion/publication kept distinct. Add a deterministic late-patch regression
+and cover split payloads, branches/returns, wraps, SDK records and failures
+before runtime qualification. Interrupt gating remains a separate experiment.
+
 ## Target and current evidence
 
 First target: sustained 60 FPS in representative gameplay with normal audio,
@@ -13,7 +52,9 @@ a limiter by itself cannot fix slow rendering. Track completed guest frames and
 displayed new frames separately, alongside missed deadlines and long stalls.
 
 Historical fixed-view measurements are roughly 40–50 ms/frame. Reaching 16.67 ms
-there needs about 2.4–3 times the throughput, and active combat may cost more.
+there needs about 2.4–3 times the throughput. Reconstructed combat windows have
+less draw/readback/upload work than the paused view; combat frame time still
+needs direct measurement.
 The candidate149 three-pair result of 52.600→41.421 ms lacks hardware telemetry;
 the later concurrent hardware-recorded comparison was inconclusive. Neither
 proves current controller gameplay performance after the launcher correction.

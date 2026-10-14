@@ -13,6 +13,7 @@
 
 #include "kernel.h"
 #include "xbox_memory_layout.h"   /* RECOMP_TLS, g_fs_base */
+#include "nv2a_order_trace.h"
 #include <stdio.h>
 #include <stdlib.h>
 #if defined(_WIN32)
@@ -179,6 +180,7 @@ static void irql_track(KIRQL old_level, KIRQL new_level, void *ra)
     d = now ? InterlockedIncrement(&g_irql_raised_count)
             : InterlockedDecrement(&g_irql_raised_count);
     InterlockedIncrement(&s_transitions);
+    nv2a_order_trace(NV_ORDER_IRQL,old_level,new_level,(uint32_t)d,g_esp);
     if (now)
         irql_holder_add(ra);
     else

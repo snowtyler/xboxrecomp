@@ -32,6 +32,7 @@
 #include <time.h>
 #include "kernel.h"   /* XBOX_CONTIG_BASE / XBOX_CONTIG_SIZE */
 #include "xbox_memory_layout.h"   /* xbox_Nv2aFrameCounterFlip */
+#include "nv2a_order_trace.h"
 #include "../video/fb_gpu_present.h"
 /* The swizzle decoder the D3D8 layer already uses -- one implementation of
  * Morton order, not a second one that can disagree with it. */
@@ -3123,15 +3124,18 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
     switch (method) {
     case 0x0100: /* NO_OPERATION: nonzero parameter traps a software method. */
         if(param) {
+            nv2a_order_trace(NV_ORDER_TRAP,0,subch,param,0);
             nv2a_hw_perf_event(NV2A_PERF_TRAP);
             if(!nv2a_hw_sync_reason(NV2A_SYNC_TRAP,0)){xbox_Nv2aFenceBatchFail();return;}
             /* A trap observes completed prefix commands, including their
              * semaphore writes, before the original ISR can recycle data. */
             if(!xbox_Nv2aFenceBatchFlush())return;
+            nv2a_order_trace(NV_ORDER_TRAP,1,subch,param,0);
             uint64_t began=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
             if(!xbox_Nv2aSoftwareNotify(subch,param))note_unhandled(method,param);
             nv2a_hw_perf_trap_wait((uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-began);
             nv2a_hw_guest_write();
+            nv2a_order_trace(NV_ORDER_TRAP,2,subch,param,0);
         }
         break;
     case 0x0110: /* WAIT_FOR_IDLE */

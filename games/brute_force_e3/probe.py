@@ -55,9 +55,10 @@ except FileExistsError:
     parser.error("Another probe owns runtime-probe.lock; inspect it before starting another test")
 proc = None
 metrics_proc = None
+order_proc = None
 def release_probe_lock():
     # Unhandled observer errors must not leave an unbounded game behind.
-    for owned in (proc, metrics_proc):
+    for owned in (proc, metrics_proc, order_proc):
         if owned is not None and owned.poll() is None:
             owned.kill()
             owned.wait()
@@ -91,12 +92,15 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
                    "RECOMP_HW_PRESENT", "RECOMP_HW_COLOR_RELOAD", "RECOMP_HW_TARGET_POOL_DISABLE", "RECOMP_HW_TARGET_POOL",
                    "RECOMP_HW_BULK_READBACK", "RECOMP_HW_READBACK_FENCE", "RECOMP_HW_VSH_GATHER_ALL", "RECOMP_PB_REPORT_MS", "RECOMP_PERF_WINDOWS",
                    "RECOMP_AUDIO_TRACE", "RECOMP_PAD_SCRIPT", "RECOMP_WATCHDOG_SECS"]
-    config_keys += ["RECOMP_HW_COUNTERS", "RECOMP_HW_CPU_TIMING", "RECOMP_HW_RELEASE_COALESCE",
-                    "RECOMP_HW_RELEASE_BARRIER", "RECOMP_HW_TEXTURE_HASH", "RECOMP_HW_TEXTURE_EPOCH"]
+    config_keys = sorted(set(config_keys) | {key for key in env if key.startswith(('RECOMP_', 'BRUTE_FORCE_E3_'))})
     (p / f"analysis/{args.name}-process.json").write_text(json.dumps({"pid": proc.pid,
         "executable": args.exe, "configuration": {key: env.get(key) for key in config_keys},
         "capture_from": args.capture_from, "capture_for": args.capture_for,
         "capture_windows": capture_windows}, indent=2))
+    if env.get('RECOMP_NV2A_ORDER_TRACE'):
+        order_proc=subprocess.Popen([os.sys.executable,str(p/'capture_order_trace.py'),
+            '--pid',str(proc.pid),'--output',str(p/f'analysis/{args.name}-order.csv'),
+            '--seconds',str(args.seconds+10)],stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
     if args.measure:
         measure_command = [os.sys.executable, str(p / "performance.py"), "monitor",
                            "--name", args.name, "--until", str(args.seconds + 15),
@@ -121,6 +125,16 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
                                 "--pid", str(proc.pid), "--output",
                                 str(p / f"analysis/{args.name}-guest-inspection.json")],
                                stdout=out, stderr=err, timeout=30)
+                if order_proc or env.get('RECOMP_HW_COUNTERS'):
+                    with (p/f'analysis/{args.name}.stderr.log').open('rb') as trace_log:
+                        trace_log.seek(0,2);trace_log.seek(max(0,trace_log.tell()-1048576))
+                        reports=[line for line in trace_log.read().decode(errors='replace').splitlines()
+                                 if line.startswith('[HW COUNTERS] ')]
+                    if reports:
+                        executor=json.loads(reports[-1][14:])['thread_id']
+                        subprocess.run([os.sys.executable,str(p/'inspect_guest.py'),'--pid',str(proc.pid),
+                            '--tid',str(executor),'--output',str(p/f'analysis/{args.name}-executor-inspection.json')],
+                            stdout=out,stderr=err,timeout=30)
             if args.sample_from >= 0 and not sampled and elapsed >= args.sample_from:
                 sampled = True
                 subprocess.run([os.sys.executable, str(p / "sample_cpu.py"),
@@ -162,3 +176,7 @@ if metrics_proc:
     if metrics_proc.returncode:
         print(f"Performance monitor exited {metrics_proc.returncode}; inspect its logs.")
 print(json.dumps(result))
+if order_proc:
+    try:order_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:order_proc.kill();order_proc.wait()
+    if order_proc.returncode:raise RuntimeError('Order observer failed; inspect the trace metadata')
