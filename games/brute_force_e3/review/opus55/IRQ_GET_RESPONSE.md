@@ -318,13 +318,17 @@ Excluding "both stale" needs a full barrier on **both** sides.
   on x64) so the GET store is globally visible before later command loads. A
   plain volatile store is not enough.
 - **Guest side.** The original code has `0039F140` between the patch and the
-  recheck. If it touches PFB (the `+0x100410` write-combine flush), the
-  default runtime traps that page as `PAGE_NOACCESS` (`pfb_arm_write_trap`).
-  The fault serialises, and `pfb_write` uses `InterlockedExchange`, which
-  gives the barrier. **Verify this by disassembling `0039F140`.** With
-  `RECOMP_NV2A_PFB_POLL` set, the trap is off and a window of about ten
-  nanoseconds remains. Qualification must run with it unset, as the launchers
-  already do.
+  recheck. Codex's follow-up check found that it executes `SFENCE`, writes
+  PFB `+0x100410`, then polls it, and that **the generated C drops the
+  `SFENCE`**. The guest's only remaining barrier is therefore the default PFB
+  page trap (`pfb_arm_write_trap`, `PAGE_NOACCESS`): the fault serialises,
+  and `pfb_write` uses `InterlockedExchange`. With `RECOMP_NV2A_PFB_POLL` set,
+  or if the trap fails to arm, no guest-side barrier exists. **Qualification
+  must verify the trap is active** (the `NV2A PFB: coherent write-combine
+  flush completes on write` line, plus a counter of PFB faults taken). It
+  must not merely assume the launchers leave the flag unset. Separately,
+  consider making the recompiler emit a full fence for `SFENCE`/`MFENCE`/
+  `LFENCE`, so ordering does not depend on a debug trap staying enabled.
 - **Compiler side.** Check the generated C for `sub_0039EC10`, and for
   `0039F140` if it is inlined. The compiler must not move the patch stores
   past the GET load. Guest stores to different addresses are reorderable
@@ -341,11 +345,11 @@ Excluding "both stale" needs a full barrier on **both** sides.
 | **JUMP forward within the root** | Publish the target before reading it. |
 | **JUMP backward within the root** | Not expected from the SDK. Hardware would move GET backward. Publish the target, which is faithful and keeps I1 because those bytes are about to be re-read, and count it with a one-line log. The expected count is 0. If it is ever nonzero, investigate before continuing qualification. |
 | **JUMP out of the ring** (`child = 1` via jump) | Hold at `from + 4`. On the jump back to `T` in the root, publish `T` before reading. A jump to a ring address outside the root still `break`s, as today. |
-| **Wrap** | The ack thread scans `[last_put, put_hi)` and then `[put_lo, put)`. The first walk `break`s on the JUMP to `low`. Publish `low` between the two pieces **only if** `nv2a_pb_set_ring_bounds` came from the SDK binding (`[PB RING] SDK bounds …`). With learned bounds, hold until the final `GET = PUT`. Never publish `high`. Run a fixture where the record is before the wrap and GET is after, with the writer below GET (§4, F). |
+| **Wrap** | The ack thread scans `[last_put, put_hi)` and then `[put_lo, put)`. The first walk `break`s on the JUMP to `low`. Publish `low` between the two pieces **only if** the bounds were read from the SDK binding (`[PB RING] SDK bounds …`). With learned bounds, hold until the final `GET = PUT`. Never publish `high`. Today `nv2a_pb_set_ring_bounds(low, high)` receives learned and SDK values through the same call, so the walker cannot tell them apart. **Pass provenance explicitly**, for example `nv2a_pb_set_ring_bounds(low, high, NV2A_RING_SDK_VERIFIED)`. All in-segment publication, not only the wrap, should require SDK-verified bounds, because I3 depends on them. With learned bounds, GET progress stays off for that segment, and a counter records it. Run a fixture where the record is before the wrap and GET is after, with the writer below GET (§4, F). |
 | **Split payload** (`s_pending_*`) | Mid-payload publication is safe (I1). At segment end, `GET = PUT` mid-method is unchanged from today. A `[PB RESUME]` mismatch remains a diagnostic. |
 | **SDK action-3 records** | The cursor never lands inside a record; it moves from the record start directly to `next`, and only after `acquire_input` and the read. Do not "optimise" by publishing `record + n`. |
 | **Storage reuse** | After `G` advances, the guest may overwrite `[old G, G)`. The poisoning fixture (§4, I) proves that nothing re-reads that region. Diagnostic dumps must say that they may show reused bytes. |
-| **Failures** (`pb_reject`, unreadable, unknown header, budget, bad record, rejected trap flush) | Stop in-segment publication at the last fully consumed command before the failing word. Batch-fail semantics stay unchanged: no semaphore publication from the failed prefix. Leave the existing post-scan `GET = PUT` policy unchanged, so the experiment changes only one variable. Log `[PB GET] frozen at X on failure; final policy PUT`. Whether failures should instead freeze GET is a separate decision; it would turn silent overwrites into a loud ring-full hang. |
+| **Failures** (`pb_reject`, unreadable, unknown header, budget, bad record, rejected trap flush) | The walker sees only its own `pb_reject`. Command handlers fail independently: `nv2a_pb_exec.c` has eight `xbox_Nv2aFenceBatchFail()` call sites (a release sync failure, an invalid vertex range, …), and a rejected trap flush simply `return`s at line 3132. In each of these cases the walker keeps going. **GET progress must therefore gate on the batch-failed state, not on the walker's own failures.** Expose a cheap query such as `xbox_Nv2aFenceBatchFailed()`, or have `BatchFail` set a walker-visible latch. Check it after every `exec_method` return, before any publication. Once it is set, freeze in-segment GET for the remainder of the scan. Stop in-segment publication at the last fully consumed command before the failing word. Batch-fail semantics stay unchanged: no semaphore publication from the failed prefix. Leave the existing post-scan `GET = PUT` policy unchanged, so the experiment changes only one variable. Log `[PB GET] frozen at X on failure; final policy PUT`. Whether failures should instead freeze GET is a separate decision; it would turn silent overwrites into a loud ring-full hang. |
 
 **Implementation sketch.** This is opt-in, for example
 `RECOMP_NV2A_GET_PROGRESS=1`, and independent of `RECOMP_NV2A_IRQ_GATE` and
@@ -356,9 +360,11 @@ coalescing.
 static void (*s_get_publish)(uint32_t va);   /* bound by the ack thread */
 static uint32_t s_get_pub;                   /* last published VA */
 void nv2a_pb_bind_get_publisher(void (*fn)(uint32_t)) { s_get_publish = fn; }
+static int s_ring_verified;                  /* set only from SDK-bound provenance */
 static void get_progress(uint32_t ring_va, int force)
 {
-    if (!s_get_publish || ring_va < s_ring_low || ring_va >= s_ring_high) return;
+    if (!s_get_publish || !s_ring_verified || xbox_Nv2aFenceBatchFailed()) return;
+    if (ring_va < s_ring_low || ring_va >= s_ring_high) return;
     if (!force && ring_va - s_get_pub < 0x400u) return;   /* same lap only */
     s_get_pub = ring_va; s_get_publish(ring_va);
 }
@@ -367,7 +373,8 @@ static void get_progress(uint32_t ring_va, int force)
  * after JUMP to an in-root target:  get_progress(target, 1);
  * after CALL:                        get_progress(return_va, 1);
  * after NOP-record skip:             get_progress(next, 0);
- * never after pb_reject; never with va == end_va of the final piece. */
+ * never after pb_reject or a handler-side BatchFail (checked above);
+ * never with va == end_va of the final piece. */
 
 /* xbox_memory_layout.c */
 static void nv2a_get_publish(uint32_t va)
@@ -412,7 +419,7 @@ stubs `exec_method`, the fence batch and `acquire_input`. Add:
 | **G. Split payload** | A segment ends mid-INLINE_ARRAY. Resume is correct, in-segment GET ≤ the split point, and final GET = PUT. |
 | **H. SDK action-3 record** | GET never lands in `(record, next)`. The record is read before any publication past it. |
 | **I. Poisoning** | For A–H, the publisher overwrites `[old G, new G)` (wrap-aware) with `0xDEADBEEF`-style headers immediately. The executed `(method, param)` stream and the release/publish sequence must be identical to an unpoisoned run. **This is the direct proof of "no acknowledged unread storage".** |
-| **J. Failures** | Unreadable word, unknown header, budget, bad record continuation, rejected trap flush. No publication past the last good command. Batch-fail behaviour is unchanged. Final GET follows the existing policy. |
+| **J. Failures** | Unreadable word, unknown header, budget, bad record continuation, **and handler-side failures the walker does not see**: a stub `exec_method` that calls `xbox_Nv2aFenceBatchFail()` mid-segment, and a rejected trap flush. No publication past the last good command; GET is frozen from the handler failure onward. Batch-fail behaviour is unchanged. Final GET follows the existing policy. |
 | **K. Publication unchanged** | With the flag on and off, the semaphore `PUBLISH` sequence and its timing relative to traps and batch end are identical. Only `GET` events differ. |
 | **L. Equality** | In-segment publication never equals PUT. The final GET is written after `FenceBatchEnd`. |
 
@@ -451,6 +458,10 @@ stage below measures the invariant directly.
   `ringdist(G_visible, A) ≥ 0x1C00`. Controls should show thousands per run,
   which shows the monitor sees the hazard.
 - Extend the stall snapshot as listed in §1.5.
+- Record whether the PFB trap armed, and count the PFB faults taken. The
+  guest-side ordering depends on it, because the generated C drops
+  `0039F140`'s `SFENCE`.
+- Add ring-bound provenance (SDK-verified vs learned) to the order trace.
 
 **Stage 1: fixtures.** §4 in full, plus the existing suite. Run them in
 barrier and coalesced configurations.
@@ -528,7 +539,8 @@ stays out of all of these arms.
   The precondition appears in every run. Coalescing widened the window by
   removing the per-release drain.
 - The next candidate is opt-in, cursor-trailing GET progress (stride 0x400,
-  locked store, ring-only, never `high` or `PUT`, frozen on failure). It
+  locked store, ring-only with SDK-verified bounds, never `high` or `PUT`,
+  frozen on any walker or handler-side batch failure). It
   keeps the GPU-completion and semaphore-publication rules unchanged.
 - Fixtures A–L come first, with the poisoning and interleaving-sweep tests as
   the core. Then the stage-0 monitor and hook, then short routes measured by
@@ -537,3 +549,27 @@ stays out of all of these arms.
 - IRQ exclusion is a separate, evidence-first track. The precheck is not a
   fix.
 - Candidate147 is still unresolved.
+
+## Addendum: follow-up review (October 15)
+
+Codex's follow-up agrees with this review's recommendations and makes three
+tightening points. The sections above now include them.
+
+1. **`0039F140`** executes `SFENCE`, writes PFB `+0x100410`, then polls it.
+   The generated C drops the `SFENCE`, so guest ordering rests on the PFB
+   trap's fault and `InterlockedExchange`. Qualification must verify that
+   the trap is active (§2.4, stage 0). This was not re-verified here, because
+   the generated sources are not in the repository.
+2. **Handler-side failures.** `exec_method` can fail the batch (eight
+   `BatchFail` sites, and the silent trap-flush return at
+   `nv2a_pb_exec.c:3132`) without the walker knowing. GET progress must gate
+   on the batch-failed state (§3, the sketch, fixture J). I confirmed this in
+   source.
+3. **Ring-bound provenance.** Learned and SDK bounds share
+   `nv2a_pb_set_ring_bounds`. Pass provenance explicitly and publish only with
+   SDK-verified bounds (§3, the sketch). I confirmed this in source.
+
+The agreed sequence is: evidence hooks and the fetch-bound monitor, then the
+deterministic interleaving and storage-reuse fixtures, then opt-in GET
+progress, then runtime qualification. Neither coalescing nor IRQ gating is
+ready for promotion. Candidate147 remains unresolved.
