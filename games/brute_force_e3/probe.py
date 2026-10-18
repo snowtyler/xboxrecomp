@@ -111,6 +111,7 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
         "launch_monotonic_seconds": start,
         "monotonic_clock": time.get_clock_info("monotonic").implementation,
         "state_interval": args.state_interval,
+        "sample_from": args.sample_from, "sample_for": args.sample_for,
         "capture_from": args.capture_from, "capture_for": args.capture_for,
         "capture_windows": capture_windows}, indent=2))
     if args.state_interval:

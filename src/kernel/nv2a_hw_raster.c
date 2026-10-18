@@ -114,8 +114,11 @@ static struct {
     uint64_t events[NV2A_PERF_EVENT_COUNT], segments, releases, segment_depth;
     uint64_t release_histogram[9], color, depth, fences, trap_ticks;
     uint64_t texture_compare_bytes, snapshot_compare_bytes, vertex_upload_bytes;
+    uint64_t color_readback_bytes, depth_readback_bytes;
     uint64_t report_id, last_report_ms;
-    struct { uint64_t calls, failed, ticks, outcomes[8]; } sync[NV2A_SYNC_REASON_COUNT];
+    struct { uint64_t calls, failed, ticks, outcomes[8];
+        uint64_t work_ticks, color, depth, readback_bytes, cpu_ticks, cpu_errors;
+    } sync[NV2A_SYNC_REASON_COUNT];
     struct { uint32_t width, height, bpp; uint64_t count; } targets[32];
     uint64_t target_overflow;
 } perf;
@@ -126,6 +129,12 @@ static int perf_enabled(void)
         perf.enabled=getenv("RECOMP_HW_COUNTERS")!=NULL;
     }
     return perf.enabled;
+}
+static int perf_sync_cpu_enabled(void)
+{
+    static int on=-1;
+    if(on<0){const char *e=getenv("RECOMP_HW_SYNC_CPU");on=e&&strcmp(e,"1")==0;}
+    return on;
 }
 void nv2a_hw_segment_begin(void)
 {
@@ -173,6 +182,8 @@ void nv2a_hw_perf_report(void)
         (unsigned long long)perf.color,(unsigned long long)perf.depth,(unsigned long long)perf.fences,
         perf.trap_ticks*ms,(unsigned long long)perf.texture_compare_bytes,
         (unsigned long long)perf.snapshot_compare_bytes,(unsigned long long)perf.vertex_upload_bytes);
+    fprintf(stderr,",\"color_readback_bytes\":%llu,\"depth_readback_bytes\":%llu",
+        (unsigned long long)perf.color_readback_bytes,(unsigned long long)perf.depth_readback_bytes);
     for(unsigned i=0;i<NV2A_PERF_EVENT_COUNT;i++)fprintf(stderr,",\"%s\":%llu",events[i],(unsigned long long)perf.events[i]);
     fputs(",\"release_histogram\":[",stderr);
     for(unsigned i=0;i<9;i++)fprintf(stderr,"%s%llu",i?",":"",(unsigned long long)perf.release_histogram[i]);
@@ -181,7 +192,12 @@ void nv2a_hw_perf_report(void)
         fprintf(stderr,"%s\"%s\":{\"calls\":%llu,\"failed\":%llu,\"ms\":%.3f,\"outcomes\":[",i?",":"",reasons[i],
             (unsigned long long)perf.sync[i].calls,(unsigned long long)perf.sync[i].failed,perf.sync[i].ticks*ms);
         for(unsigned j=0;j<8;j++)fprintf(stderr,"%s%llu",j?",":"",(unsigned long long)perf.sync[i].outcomes[j]);
-        fputs("]}",stderr);
+        fprintf(stderr,"],\"work_ms\":%.3f,\"color_readbacks\":%llu,\"depth_readbacks\":%llu,\"readback_bytes\":%llu,\"cpu_ms\":",
+            perf.sync[i].work_ticks*ms,(unsigned long long)perf.sync[i].color,
+            (unsigned long long)perf.sync[i].depth,(unsigned long long)perf.sync[i].readback_bytes);
+        if(perf_sync_cpu_enabled())fprintf(stderr,"%.3f",perf.sync[i].cpu_ticks/10000.0);
+        else fputs("null",stderr);
+        fprintf(stderr,",\"cpu_errors\":%llu}",(unsigned long long)perf.sync[i].cpu_errors);
     }
     fputs("},\"targets\":[",stderr);
     unsigned count=0;
@@ -381,6 +397,12 @@ static int map_readback(ID3D11Texture2D *resource,D3D11_MAPPED_SUBRESOURCE *map,
     }
     QueryPerformanceCounter(&ended);++g.sync_interval.readbacks[plane];
     if(perf_enabled()){if(plane)++perf.depth;else ++perf.color;}
+    if(SUCCEEDED(hr)&&perf_enabled()) {
+        /* Logical texel payload, excluding mapped row padding and unknown
+         * driver/bus transfers. Both staging planes use four-byte texels. */
+        if(plane)perf.depth_readback_bytes+=(uint64_t)g.depth_target.width*g.depth_target.height*4;
+        else perf.color_readback_bytes+=(uint64_t)g.target.width*g.target.height*4;
+    }
     g.sync_interval.map_ticks[plane]+=ended.QuadPart-began.QuadPart;
     if(FAILED(hr))fprintf(stderr,"[HW READBACK] Map failed %08lX device=%08lX\n",hr,ID3D11Device_GetDeviceRemovedReason(g.device));
     return SUCCEEDED(hr);
@@ -550,13 +572,34 @@ int nv2a_hw_sync_reason(Nv2aSyncReason reason,int read_managed_depth)
     }
     if((unsigned)reason>=NV2A_SYNC_REASON_COUNT)reason=NV2A_SYNC_CPU;
     LARGE_INTEGER began,ended;QueryPerformanceCounter(&began);
+    /* Detailed CPU attribution is opt-in: two thread-clock queries per sync,
+     * outside normal execution. Use long windows because this clock is coarse. */
+    int cpu_on=perf_sync_cpu_enabled();
+    FILETIME created,exited,kernel,user;uint64_t cpu_before=0,cpu_after=0;
+    int cpu_valid=1;
+    if(cpu_on) {
+        cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user);
+        if(cpu_valid)cpu_before=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
+                                 (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
+    }
     uint64_t color=perf.color,depth=perf.depth,fences=perf.fences;
+    uint64_t bytes=perf.color_readback_bytes+perf.depth_readback_bytes;
     int result=synchronize(read_managed_depth);
     if(!result)check_device_removed("synchronization");
     QueryPerformanceCounter(&ended);
+    if(cpu_on) {
+        cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user)&&cpu_valid;
+        if(cpu_valid)cpu_after=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
+                                (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
+        if(cpu_valid&&cpu_after>=cpu_before)perf.sync[reason].cpu_ticks+=cpu_after-cpu_before;
+        else ++perf.sync[reason].cpu_errors;
+    }
     unsigned outcome=(perf.color!=color?1:0)|(perf.depth!=depth?2:0)|(perf.fences!=fences?4:0);
     ++perf.sync[reason].calls;++perf.sync[reason].outcomes[outcome];
     perf.sync[reason].failed+=!result;perf.sync[reason].ticks+=ended.QuadPart-began.QuadPart;
+    if(outcome)perf.sync[reason].work_ticks+=ended.QuadPart-began.QuadPart;
+    perf.sync[reason].color+=perf.color-color;perf.sync[reason].depth+=perf.depth-depth;
+    perf.sync[reason].readback_bytes+=perf.color_readback_bytes+perf.depth_readback_bytes-bytes;
     return result;
 }
 int nv2a_hw_sync(void){return nv2a_hw_sync_reason(NV2A_SYNC_CPU,1);}

@@ -565,6 +565,32 @@ static int hs_on(void)
     return g_hs.on;
 }
 
+/* Called only from the APU producer thread, at the existing once/second host
+ * report. Optional observations do not change pacing or rendering. */
+static void hs_cpu_report(void)
+{
+#ifdef _WIN32
+    static int on=-1;
+    if(on<0)on=apu_env_on("RECOMP_AUDIO_CPU_TRACE");
+    if(on) {
+        FILETIME created,exited,kernel,user;
+        LARGE_INTEGER q,f;
+        int valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user);
+        QueryPerformanceCounter(&q);QueryPerformanceFrequency(&f);
+        _lock_file(stderr);
+        fprintf(stderr,"[APU CPU] {\"tid\":%lu,\"qpc_ms\":%.3f,\"cpu_ms\":",
+            GetCurrentThreadId(),q.QuadPart*1000.0/f.QuadPart);
+        if(valid) {
+            uint64_t ticks=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
+                           (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
+            fprintf(stderr,"%.3f",ticks/10000.0);
+        } else fputs("null",stderr);
+        fprintf(stderr,",\"submitted\":%llu}\n",(unsigned long long)g_hs.submitted);
+        _unlock_file(stderr);
+    }
+#endif
+}
+
 /* Called with the frame thread's view of FECTL each loop iteration. */
 static void hs_trap(bool trapped)
 {
@@ -665,6 +691,7 @@ static void hs_submit(int n, int ok, int q)
                 (unsigned long long)g_hs.submitted, q);
 
     if (now >= g_hs.next_report_us) {
+        hs_cpu_report();
         fprintf(stderr, "[AUDIO-HOST] wav=%llu played=%llu starves=%u starved_ms=%.1f pending_ms=%.1f"
                 " deficit=%lld refused=%u gap_max_ms=%.1f q_min=%d trap_spells=%u trap_long=%u"
                 " trap_max_ms=%.1f underruns=%u\n",

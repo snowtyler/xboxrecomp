@@ -4,7 +4,8 @@ $disabledTask = @('RECOMP_AUDIO_MUTE','RECOMP_NV2A_PFB_POLL','RECOMP_HW_RELEASE_
                   'RECOMP_GPU_TIMING','RECOMP_HW_COUNTERS','RECOMP_NV2A_IRQ_GATE',
                   'RECOMP_NV2A_ORDER_TRACE','RECOMP_NV2A_GET_PROGRESS','RECOMP_NV2A_GET_MONITOR',
                   'RECOMP_FB_DUMP_GUEST_FLIPS','RECOMP_PAD_SCRIPT_EXCLUSIVE','RECOMP_BRUTE_FORCE_ROUTE_STATE',
-                  'RECOMP_BRUTE_FORCE_WAIT_PROFILE')
+                  'RECOMP_BRUTE_FORCE_WAIT_PROFILE','RECOMP_HW_SYNC_CPU','RECOMP_AUDIO_CPU_TRACE',
+                  'RECOMP_COMBAT_PROFILE_LEAN')
 $originalTask = @{}
 $captureHolderTask = [pscustomobject]@{ Environment=$null }
 foreach ($keyTask in $disabledTask + @('RECOMP_HW_TEXTURE_EPOCH')) {

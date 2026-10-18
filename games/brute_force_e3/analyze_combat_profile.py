@@ -57,7 +57,10 @@ def wait_window(rows, window, zero, exclusions=()):
 
 def renderer_window(rows, window, zero, exclusions=()):
     total = {"flips": 0, "draws": 0, "executor_cpu_ms": 0, "release_ms": 0,
-             "release_calls": 0, "all_sync_ms": 0, "trap_ms": 0}
+             "release_calls": 0, "release_work_calls": 0, "release_work_ms": 0,
+             "segments": 0, "segments_with_releases": 0, "color": 0, "depth": 0,
+             "all_sync_ms": 0, "trap_ms": 0}
+    optional = dict.fromkeys(("color_readback_bytes", "depth_readback_bytes", "release_cpu_ms"), 0)
     seconds = 0
     for before, after in zip(rows, rows[1:]):
         start, end = before["qpc_ms"] / 1000 - zero, after["qpc_ms"] / 1000 - zero
@@ -67,15 +70,30 @@ def renderer_window(rows, window, zero, exclusions=()):
         if delta is None:
             continue
         seconds += end - start
-        for key in ("flips", "draws", "trap_ms"):
+        for key in ("flips", "draws", "trap_ms", "segments", "color", "depth"):
             total[key] += delta[key]
         if delta["executor_cpu_ms"] is not None:
             total["executor_cpu_ms"] += delta["executor_cpu_ms"]
         total["release_ms"] += delta["sync"]["release"]["ms"]
         total["release_calls"] += delta["sync"]["release"]["calls"]
+        total["release_work_calls"] += sum(delta["sync"]["release"]["outcomes"][1:])
+        work_ms = delta["sync"]["release"].get("work_ms")
+        total["release_work_ms"] += work_ms if work_ms is not None else delta["sync"]["release"]["ms"]
+        total["segments_with_releases"] += sum(delta["release_histogram"][1:])
+        for key in optional:
+            value = delta["sync"]["release"].get("cpu_ms") if key == "release_cpu_ms" else delta.get(key)
+            optional[key] = optional[key]+value if optional[key] is not None and value is not None else None
         total["all_sync_ms"] += sum(v["ms"] for v in delta["sync"].values())
+    total.update(optional)
+    calls, work, flips = total["release_calls"], total["release_work_calls"], total["flips"]
+    removable = max(0, calls-total["segments_with_releases"])
     return {"seconds": seconds, "totals": total,
-            "per_flip": {key: value / total["flips"] for key, value in total.items()
+            "release_ms_per_call": total["release_ms"]/calls if calls else None,
+            "release_ms_per_work_call": total["release_work_ms"]/work if work else None,
+            "optimistic_constant_call_cost_saving_ms_per_flip":
+            total["release_ms"]/calls*removable/flips if calls and flips else None,
+            "coalescing_model_limits": "Mean-cost model retaining one release call per nonempty segment; forced drains, replacement syncs, different target sizes and no-op distribution can invalidate the estimate. Not a guaranteed saving or strict mathematical bound.",
+            "per_flip": {key: value / total["flips"] if value is not None else None for key, value in total.items()
                          if key not in ("flips", "draws")} if total["flips"] else {},
             "fps": total["flips"] / seconds if seconds else None}
 
@@ -128,6 +146,32 @@ def audio_window(rows, window, zero, rate=48000):
             "limits": "Device deficit includes dry time and rate uncertainty; the submission WAV omits device-inserted silence."}
 
 
+def apu_window(rows, window, zero):
+    selected = [r for r in rows if window[0] <= r["qpc_ms"]/1000-zero <= window[1]]
+    if len(selected)<2:
+        return {"status": "insufficient_reports"}
+    a,b=selected[0],selected[-1]
+    if a["tid"]!=b["tid"] or b["submitted"]<a["submitted"]:
+        raise ValueError("APU producer identity/counters changed")
+    seconds=(b["qpc_ms"]-a["qpc_ms"])/1000
+    return {"seconds": seconds, "tid": a["tid"],
+            "cpu_ms": b["cpu_ms"]-a["cpu_ms"] if a["cpu_ms"] is not None and b["cpu_ms"] is not None else None,
+            "source_frames_per_second": (b["submitted"]-a["submitted"])/seconds}
+
+
+def readback_accounting_errors(rows):
+    errors=[]
+    for row in rows:
+        if "color_readback_bytes" not in row:
+            continue  # Legacy archives did not measure byte volume.
+        payload=row["color_readback_bytes"]+row["depth_readback_bytes"]
+        attributed=sum(reason["readback_bytes"] for reason in row["sync"].values())
+        if payload!=attributed:
+            errors.append("readback byte total differs from sync-reason attribution")
+            break
+    return errors
+
+
 def analyze(prefix, windows, clock_log=None):
     def side(s): return prefix.with_name(prefix.name+s)
     manifest = json.loads(side("-process.json").read_text(encoding="utf-8-sig"))
@@ -136,8 +180,13 @@ def analyze(prefix, windows, clock_log=None):
     waits = records(text, "[SDK WAIT PROFILE] ")
     renderer = records(text, "[HW COUNTERS] ")
     device = device_rows(text)
+    apu = records(text, "[APU CPU] ")
     exclusions = [{"start": a, "end": b} for a, b in manifest["capture_windows"]]
-    exclusions.append({"start": 540, "end": 565})
+    lean = manifest["configuration"].get("RECOMP_COMBAT_PROFILE_LEAN") == "1"
+    sample_from=manifest.get("sample_from",540)
+    sample_required=sample_from>=0
+    if sample_required:
+        exclusions.append({"start": sample_from, "end": sample_from+manifest.get("sample_for",20)+5})
     gameplay_clock = clock_estimate(device)
     clock = gameplay_clock
     if clock_log is not None:
@@ -148,6 +197,7 @@ def analyze(prefix, windows, clock_log=None):
         clock["source"] = str(clock_log)
         clock["limits"] += " Separate silent default-device run after gameplay; endpoint processing quantization remains."
     errors = []
+    errors.extend(readback_accounting_errors(renderer))
     if len(waits)<2 or any(row["cpu_errors"] for row in waits):
         errors.append("SDK wait profiler missing or CPU clock reads failed")
     if len(renderer)<2:
@@ -156,10 +206,18 @@ def analyze(prefix, windows, clock_log=None):
     if config.get("RECOMP_BRUTE_FORCE_WAIT_PROFILE") != "1":
         errors.append("wait profiling was not explicitly enabled")
     sample = json.loads(side("-cpu-samples.json").read_text()) if side("-cpu-samples.json").exists() else None
-    if not sample or not sample.get("sample_wall_seconds"):
+    if sample_required and (not sample or not sample.get("sample_wall_seconds")):
         errors.append("CPU sample interval missing")
+    if lean and (sample or manifest["capture_windows"] or config.get("RECOMP_FB_DUMP")
+                 or config.get("RECOMP_AUDIO_WAV")):
+        errors.append("lean profile contains sampling, captures or WAV output")
     if config.get("RECOMP_AUDIO_DEVICE_TRACE") == "1" and len(device)<2:
         errors.append("requested device timing missing")
+    if config.get("RECOMP_AUDIO_CPU_TRACE") == "1" and (len(apu)<2 or any(r["cpu_ms"] is None for r in apu)):
+        errors.append("requested APU thread CPU timing missing")
+    if config.get("RECOMP_HW_SYNC_CPU") == "1" and any(
+            reason.get("cpu_ms") is None or reason.get("cpu_errors") for row in renderer for reason in row["sync"].values()):
+        errors.append("requested sync CPU timing missing or failed")
     return {"executable_sha256": manifest["executable_sha256"],
             "profile_observations_valid": not errors, "errors": errors,
             "guest_wait_thread_ids": sorted({r["tid"] for r in waits}),
@@ -167,12 +225,15 @@ def analyze(prefix, windows, clock_log=None):
             "windows": [{"requested": window,
                          "wait": wait_window(waits, window, zero, exclusions),
                          "renderer": renderer_window(renderer, window, zero, exclusions),
+                         "apu": apu_window(apu, window, zero),
                          "audio": audio_window(device, window, zero,
                                                clock["estimated_samples_per_second"] or 48000)}
                         for window in windows],
             "device_clock": clock,
             "gameplay_only_clock": gameplay_clock,
             "audio_long_windows": [{"requested": [n, n+60],
+                                    "renderer": renderer_window(renderer, [n,n+60], zero, exclusions),
+                                    "apu": apu_window(apu, [n,n+60], zero),
                                     **audio_window(device, [n, n+60], zero,
                                                    clock["estimated_samples_per_second"] or 48000)}
                                    for n in range(0, 600, 60)],

@@ -1,6 +1,7 @@
 import unittest
 
-from analyze_combat_profile import audio_window, clock_estimate, wait_window
+from analyze_combat_profile import audio_window, apu_window, clock_estimate, readback_accounting_errors, renderer_window, wait_window
+from test_performance import report
 
 
 def wait(t, tid=1, **changes):
@@ -18,6 +19,33 @@ def audio(t, rate=48000, underruns=0, queued=2):
 
 
 class CombatProfileTests(unittest.TestCase):
+    def test_byte_volume_is_attributed_and_legacy_is_unknown(self):
+        self.assertEqual(readback_accounting_errors([report(1)]),[])
+        row=report(1)
+        row.update(color_readback_bytes=4096,depth_readback_bytes=1024)
+        row["sync"]["release"]["readback_bytes"]=5120
+        self.assertEqual(readback_accounting_errors([row]),[])
+        row["sync"]["release"]["readback_bytes"]=4096
+        self.assertTrue(readback_accounting_errors([row]))
+    def test_per_sync_cost_uses_work_count_and_same_flip_denominator(self):
+        a,b=report(1),report(2)
+        for row in (a,b):
+            row["release_histogram"]=[0]*9
+        b["sync"]["release"].update(calls=11,ms=30,outcomes=[6,5,0,0,0,0,0,0],work_ms=24)
+        a["sync"]["release"]["work_ms"]=4
+        result=renderer_window([a,b],[2,4],0)
+        self.assertEqual(result["release_ms_per_call"],2)
+        self.assertEqual(result["release_ms_per_work_call"],5)
+        self.assertIsNone(result["per_flip"]["color_readback_bytes"])
+
+    def test_apu_cpu_and_production_share_one_clock_interval(self):
+        rows=[dict(tid=7,qpc_ms=1000,cpu_ms=50,submitted=48000),
+              dict(tid=7,qpc_ms=61000,cpu_ms=650,submitted=48000+60*42000)]
+        result=apu_window(rows,[1,61],0)
+        self.assertEqual(result["cpu_ms"],600)
+        self.assertEqual(result["source_frames_per_second"],42000)
+        rows[-1]["tid"]=8
+        with self.assertRaises(ValueError):apu_window(rows,[1,61],0)
     def test_separate_descheduling_from_cpu_and_event_waits(self):
         result = wait_window([wait(10), wait(20, completed=5, poll_count=3,
                              event_count=2, poll_wall_ms=3000, poll_cpu_ms=500,

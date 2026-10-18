@@ -13,9 +13,13 @@ param(
     [double]$InspectFrom = -1,
     [double]$StateInterval = 0,
     [switch]$Measure,
+    [switch]$NoSurfaceDumps,
     [string]$PadScript = '5000:start:400,8000:a:400,12000:down:400,16000:a:400'
 )
 $ErrorActionPreference = 'Stop'
+if($NoSurfaceDumps -and ($CaptureFrom -ge 0 -or $Captures)) {
+    throw 'NoSurfaceDumps cannot be combined with capture windows.'
+}
 if ($Name -notmatch '^[A-Za-z0-9_-]+$') { throw 'Use a simple probe name.' }
 $analysisTask = Join-Path $PSScriptRoot 'analysis'
 $env:BRUTE_FORCE_E3_FENCE_MIRROR = '1'
@@ -30,7 +34,10 @@ $env:RECOMP_AC97_READY = if ($Audio) { '1' } else { $null }
 if ($DspDoorbell) { $env:RECOMP_APU_DSP_ACK = $DspDoorbell }
 $env:RECOMP_STUB_TRACE = '1'
 $env:RECOMP_PB_REPORT_MS = '2000'
-$env:RECOMP_FB_DUMP = Join-Path $analysisTask "$Name-frame-"
+$env:RECOMP_FB_DUMP = if($NoSurfaceDumps){$null}else{Join-Path $analysisTask "$Name-frame-"}
+if($NoSurfaceDumps) {
+    Remove-Item Env:RECOMP_FB_DUMP,Env:RECOMP_FB_DUMP_FLIPS,Env:RECOMP_FB_DUMP_GUEST_FLIPS -ErrorAction SilentlyContinue
+}
 $env:RECOMP_PAD_LIVE = Join-Path $analysisTask "$Name-live.txt"
 $env:RECOMP_FRAME_TRACE = Join-Path $analysisTask "$Name-trace.flag"
 $env:RECOMP_FRAME_TRACE_VERTICES = if ($Vertices) { '1' } else { $null }

@@ -23,6 +23,22 @@ def report(number, scale=1):
 
 
 class CounterTests(unittest.TestCase):
+    def test_readback_bytes_and_sync_cpu_remain_optional_and_monotonic(self):
+        before, after = report(1), report(2)
+        legacy = performance.counter_delta(before, after)
+        self.assertIsNone(legacy["color_readback_bytes"])
+        self.assertIsNone(legacy["sync"]["release"]["cpu_ms"])
+        for index, row in enumerate((before, after), 1):
+            row.update(color_readback_bytes=index*4096, depth_readback_bytes=index*1024)
+            row["sync"]["release"].update(work_ms=index*8, color_readbacks=index,
+                depth_readbacks=index, readback_bytes=index*5120, cpu_ms=index*6, cpu_errors=0)
+        delta=performance.counter_delta(before, after)
+        self.assertEqual(delta["color_readback_bytes"],4096)
+        self.assertEqual(delta["sync"]["release"]["readback_bytes"],5120)
+        self.assertEqual(delta["sync"]["release"]["cpu_ms"],6)
+        after["depth_readback_bytes"]=0
+        self.assertIsNone(performance.counter_delta(before,after))
+
     def test_report_and_truncated_json(self):
         parsed = performance.parse_line("[HW COUNTERS] " + json.dumps(report(1)))
         self.assertEqual(parsed["counters"]["thread_id"], 42)
