@@ -421,6 +421,37 @@ int main(void)
         assert(nv2a_hw_draw(&textured,v,4,indices,6));assert(nv2a_hw_sync());
         assert(third[24*32+8]==layout_pixels[4]);
     }
+    /* Screen-space vertex programs with +0 W render; -0 remains clipped. */
+    {
+        Nv2aHwState overlay = {0};
+        Nv2aVshSnapshot program = {0};
+        float rows[4][16][4] = {{{0}}};
+        overlay.surface = 450; overlay.width = overlay.height = 32;
+        overlay.clip_w = overlay.clip_h = 32; overlay.pitch = 128; overlay.bpp = 4;
+        overlay.color = (unsigned char *)pixels; overlay.depth_scale = 1;
+        overlay.color_mask = 0x01010101;
+        overlay.use_rc = 1; overlay.rc.final0 = 4; overlay.rc.final1 = 0x14 << 8;
+        program.count = 2;
+        program.words[0][1] = (1u << 21) | 0x1B;
+        program.words[0][2] = 2u << 26;
+        program.words[0][3] = (15u << 12) | (1u << 11);
+        program.words[1][1] = (1u << 21) | (3u << 9) | 0x1B;
+        program.words[1][2] = 2u << 26;
+        program.words[1][3] = (15u << 12) | (1u << 11) | (3u << 3) | 1u;
+        for (unsigned n = 0; n < 4; ++n) {
+            rows[n][0][0] = (n & 1) ? 32 : 0;
+            rows[n][0][1] = (n & 2) ? 32 : 0;
+            rows[n][3][0] = rows[n][3][3] = 1;
+        }
+        for (unsigned sign = 0; sign < 2; ++sign) {
+            for (unsigned n = 0; n < 1024; ++n) pixels[n] = 0xFF0000FF;
+            nv2a_hw_guest_write();
+            for (unsigned n = 0; n < 4; ++n) rows[n][0][3] = sign ? -0.0f : 0.0f;
+            assert(nv2a_hw_draw_raw(&overlay, rows, 4, indices, 6, &program));
+            assert(nv2a_hw_sync());
+            assert(pixels[16 * 32 + 16] == (sign ? 0xFF0000FF : 0xFFFF0000));
+        }
+    }
     nv2a_hw_shutdown();
     /* Shutdown releases every pooled resource along with the device. A fresh
      * device must initialize from the new backing, with no retained snapshot. */

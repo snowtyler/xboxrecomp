@@ -836,7 +836,7 @@ static int vertex_shader(const Nv2aVshSnapshot *program,ID3D11VertexShader **vs,
         "if(m==2050||m==2051||m==2052)f=abs(f);if(isnan(f))f=1;return saturate(f);}"
         "O main(V v){float4 inputs[16];");
     for(unsigned i=0;i<16;i++){snprintf(line,sizeof line,"inputs[%u]=v.a%u;",i,i);strcat(code,line);}
-    strcat(code,"NvV n=nv_vertex(inputs);O o;o.p=float4((n.p.x/window.x*2-1)*n.p.w,(1-n.p.y/window.y*2)*n.p.w,n.p.z/window.z*n.p.w,n.p.w);"
+    strcat(code,"NvV n=nv_vertex(inputs);if(asuint(n.p.w)==0u)n.p.w=1.0;O o;o.p=float4((n.p.x/window.x*2-1)*n.p.w,(1-n.p.y/window.y*2)*n.p.w,n.p.z/window.z*n.p.w,n.p.w);"
         "o.d0=n.d0;o.d1=n.d1;o.f=fogfactor(n.f.x);o.t0=n.t0;o.t1=n.t1;o.t2=n.t2;o.t3=n.t3;return o;}");
     ID3DBlob *blob=compile(code,"vs_5_0");if(!blob)return 0;
     HRESULT hr=ID3D11Device_CreateVertexShader(g.device,ID3D10Blob_GetBufferPointer(blob),ID3D10Blob_GetBufferSize(blob),NULL,&g.vertex_shaders[slot].vs);

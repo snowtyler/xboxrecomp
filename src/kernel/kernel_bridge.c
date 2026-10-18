@@ -2367,6 +2367,12 @@ static void kernel_nv2a_notify_complete(void)
     }
 }
 
+static volatile LONG g_vblank_total;
+uint32_t xbox_VblankCount(void)
+{
+    return (uint32_t)InterlockedCompareExchange(&g_vblank_total, 0, 0);
+}
+
 static void kernel_vblank_tick(void)
 {
     static int enabled = -1;
@@ -2382,6 +2388,7 @@ static void kernel_vblank_tick(void)
     if (now < next_ms)
         return;
     next_ms = now + 16;                       /* ~60 Hz */
+    InterlockedIncrement(&g_vblank_total);
 
     if (!xbox_GetConnectedInterrupt(NV2A_VECTOR))
         return;

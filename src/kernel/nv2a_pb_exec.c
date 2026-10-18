@@ -2300,7 +2300,10 @@ static int transform_vertex(uint32_t index, Nv2aVshOutput *out)
 
     for (a = 0; a < NV2A_VSH_INPUTS; a++)
         fetch_attr(&s_gpu.attr[a], index, in[a]);   /* absent: 0,0,0,1 */
-    return nv2a_vsh_run((const float (*)[4])in, out);
+    if (!nv2a_vsh_run((const float (*)[4])in, out)) return 0;
+    /* A screen-space program may leave positive-zero W; preserve -0 clipping. */
+    if (out->pos[3] == 0.0f && !signbit(out->pos[3])) out->pos[3] = 1.0f;
+    return 1;
 }
 
 static void raster_batch_program(void)

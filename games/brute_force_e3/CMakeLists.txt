@@ -58,6 +58,7 @@ set(GAME_SOURCES
     src/recomp_manual.c
     src/recomp_cpu.c
     src/recomp_get_trace.c
+    src/recomp_sdk_trace.c
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c

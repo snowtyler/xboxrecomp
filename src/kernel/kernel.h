@@ -1097,6 +1097,10 @@ void xbox_log(int level, const char* subsystem, const char* fmt, ...);
 
 int xbox_Nv2aSoftwareNotify(uint32_t subchannel, uint32_t parameter);
 
+uint32_t xbox_PortIn(uint32_t port, int width);
+void xbox_PortOut(uint32_t port, uint32_t value, int width);
+uint32_t xbox_VblankCount(void);
+
 #ifdef __cplusplus
 }
 #endif

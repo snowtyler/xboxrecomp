@@ -4,6 +4,17 @@ Planning baseline: October 14, 2026. This is a proposed sequence, not enabled
 behavior or a promised speedup. Candidate149 and its existing evidence remain
 frozen; the corrected launcher has not changed the executable.
 
+### October 18 upstream integration
+
+Selected v0.14.0 floating-point/flag, port-I/O, audio and positive-zero vertex-W
+changes are ported on `codex/integrate-v014`; see `UPSTREAM_V014_INTEGRATION.md`.
+Candidate152 reached HUD gameplay in a 600-second normal-audio/barrier run,
+with auto DSP doorbell discovery. Movie artifacts and audio underruns remain;
+this does not establish a performance gain or full replay qualification.
+The named launcher is unchanged. GET progress/coalescing/IRQ gating stayed off
+in this run. The walker and publication policy are preserved, but candidate151's
+runtime GET results must not be treated as qualification of the new guest timing.
+
 ### October 14 GET implementation update
 
 The current experiment follows `review/opus55/IRQ_GET_RESPONSE.md` and the

@@ -49,6 +49,7 @@ def main():
     subprocess.run([sys.executable, str(PROJECT / "trace_loader.py")], check=True)
     subprocess.run([sys.executable, str(PROJECT / "trace_sdk_writer.py")], check=True)
     subprocess.run([sys.executable, str(PROJECT / "trace_audio_queue.py")], check=True)
+    subprocess.run([sys.executable, str(PROJECT / "install_get_hooks.py")], check=True)
 
 
 if __name__ == "__main__":
