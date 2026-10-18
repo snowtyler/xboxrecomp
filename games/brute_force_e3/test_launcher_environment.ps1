@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 $disabledTask = @('RECOMP_AUDIO_MUTE','RECOMP_NV2A_PFB_POLL','RECOMP_HW_RELEASE_COALESCE',
                   'RECOMP_HW_RELEASE_BARRIER','RECOMP_HW_TEXTURE_HASH','RECOMP_HW_GPU_TRACE',
                   'RECOMP_GPU_TIMING','RECOMP_HW_COUNTERS','RECOMP_NV2A_IRQ_GATE',
-                  'RECOMP_NV2A_ORDER_TRACE','RECOMP_NV2A_GET_PROGRESS','RECOMP_NV2A_GET_MONITOR')
+                  'RECOMP_NV2A_ORDER_TRACE','RECOMP_NV2A_GET_PROGRESS','RECOMP_NV2A_GET_MONITOR',
+                  'RECOMP_FB_DUMP_GUEST_FLIPS','RECOMP_PAD_SCRIPT_EXCLUSIVE','RECOMP_BRUTE_FORCE_ROUTE_STATE')
 $originalTask = @{}
 $captureHolderTask = [pscustomobject]@{ Environment=$null }
 foreach ($keyTask in $disabledTask + @('RECOMP_HW_TEXTURE_EPOCH')) {
@@ -35,7 +36,19 @@ try {
             throw "Default flag is present rather than absent: $keyTask"
         }
     }
-    Write-Output 'Launcher environment checks passed: disabled flags absent, explicit epoch enabled, caller environment restored.'
+    Set-Item -LiteralPath Env:RECOMP_NV2A_GET_PROGRESS -Value '1'
+    & (Join-Path $PSScriptRoot 'play.ps1') -Executable brute_force_e3_perf149.exe -DisableGetProgress
+    if ($captureHolderTask.Environment['RECOMP_NV2A_GET_PROGRESS'] -ne '0') {
+        throw 'Explicit GET rollback must reach the child as the parsed value 0.'
+    }
+    if ([Environment]::GetEnvironmentVariable('RECOMP_NV2A_GET_PROGRESS') -ne '1') {
+        throw 'GET rollback did not restore the caller setting.'
+    }
+    if ($captureHolderTask.Environment.Contains('RECOMP_NV2A_GET_MONITOR')) {throw 'GET monitor enabled by default.'}
+    Set-Item -LiteralPath Env:RECOMP_NV2A_GET_PROGRESS -Value '0'
+    & (Join-Path $PSScriptRoot 'play.ps1') -Executable brute_force_e3_perf149.exe
+    if ($captureHolderTask.Environment['RECOMP_NV2A_GET_PROGRESS'] -ne '0') {throw 'Explicit environment rollback was discarded.'}
+    Write-Output 'Launcher environment checks passed: disabled flags absent, explicit GET rollback=0, monitor off, caller environment restored.'
 } finally {
     foreach ($keyTask in $originalTask.Keys) {
         if ($null -eq $originalTask[$keyTask]) { Remove-Item -LiteralPath "Env:$keyTask" -ErrorAction SilentlyContinue }

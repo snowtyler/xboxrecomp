@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(guest_flip_controls C)
+set(CMAKE_C_STANDARD 11)
+add_executable(guest_flip_test test_main.c)
+target_include_directories(guest_flip_test PRIVATE ../../src)
+target_compile_options(guest_flip_test PRIVATE $<$<C_COMPILER_ID:MSVC>:/UNDEBUG>)
+enable_testing()
+add_test(NAME guest_flip_controls COMMAND guest_flip_test)

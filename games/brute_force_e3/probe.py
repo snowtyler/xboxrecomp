@@ -2,6 +2,7 @@
 import argparse
 import atexit
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -24,7 +25,11 @@ parser.add_argument("--measure", action="store_true",
                     help="Record comparable host-timed gameplay report intervals")
 parser.add_argument("--inspect-from", type=float, default=-1,
                     help="Read-only guest/APU snapshot at this elapsed time")
+parser.add_argument("--state-interval", type=float, default=0,
+                    help="Read-only guest route-state polling interval; 0 disables it")
 args = parser.parse_args()
+if args.state_interval and not 0.1 <= args.state_interval <= 60:
+    parser.error("state interval must be 0 or 0.1..60 seconds")
 capture_windows = []
 if args.capture_from >= 0 and args.capture_for > 0:
     capture_windows.append((args.capture_from, args.capture_from + args.capture_for))
@@ -56,9 +61,10 @@ except FileExistsError:
 proc = None
 metrics_proc = None
 order_proc = None
+state_proc = None
 def release_probe_lock():
     # Unhandled observer errors must not leave an unbounded game behind.
-    for owned in (proc, metrics_proc, order_proc):
+    for owned in (proc, metrics_proc, order_proc, state_proc):
         if owned is not None and owned.poll() is None:
             owned.kill()
             owned.wait()
@@ -93,12 +99,25 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
                    "RECOMP_HW_BULK_READBACK", "RECOMP_HW_READBACK_FENCE", "RECOMP_HW_VSH_GATHER_ALL", "RECOMP_PB_REPORT_MS", "RECOMP_PERF_WINDOWS",
                    "RECOMP_AUDIO_TRACE", "RECOMP_PAD_SCRIPT", "RECOMP_WATCHDOG_SECS"]
     config_keys = sorted(set(config_keys) | {key for key in env if key.startswith(('RECOMP_', 'BRUTE_FORCE_E3_'))})
+    executable_path = p / "build/RelWithDebInfo" / args.exe
+    xbe_path = Path(env["BRUTE_FORCE_E3_DIR"]) / "default.xbe"
+    def digest(path):
+        with path.open("rb") as artifact:
+            return hashlib.file_digest(artifact, "sha256").hexdigest()
     (p / f"analysis/{args.name}-process.json").write_text(json.dumps({"pid": proc.pid,
         "executable": args.exe, "configuration": {key: env.get(key) for key in config_keys},
+        "executable_sha256": digest(executable_path),
+        "source_xbe_sha256": digest(xbe_path) if xbe_path.exists() else None,
         "launch_monotonic_seconds": start,
         "monotonic_clock": time.get_clock_info("monotonic").implementation,
+        "state_interval": args.state_interval,
         "capture_from": args.capture_from, "capture_for": args.capture_for,
         "capture_windows": capture_windows}, indent=2))
+    if args.state_interval:
+        state_proc = subprocess.Popen([os.sys.executable, str(p/'observe_guest_state.py'),
+            '--pid',str(proc.pid),'--output',str(p/f'analysis/{args.name}-state.jsonl'),
+            '--seconds',str(args.seconds+10),'--interval',str(args.state_interval)],
+            stdout=out,stderr=err,creationflags=subprocess.CREATE_NO_WINDOW)
     if env.get('RECOMP_NV2A_ORDER_TRACE'):
         order_proc=subprocess.Popen([os.sys.executable,str(p/'capture_order_trace.py'),
             '--pid',str(proc.pid),'--output',str(p/f'analysis/{args.name}-order.csv'),
@@ -182,3 +201,7 @@ if order_proc:
     try:order_proc.wait(timeout=5)
     except subprocess.TimeoutExpired:order_proc.kill();order_proc.wait()
     if order_proc.returncode:raise RuntimeError('Order observer failed; inspect the trace metadata')
+if state_proc:
+    try:state_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:state_proc.kill();state_proc.wait()
+    if state_proc.returncode:raise RuntimeError('Guest state observer failed; inspect its metadata')

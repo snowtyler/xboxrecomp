@@ -13,13 +13,15 @@ class QualificationTests(unittest.TestCase):
         prefix = root / "probe"
         def put(suffix, value):
             prefix.with_name(prefix.name + suffix).write_text(json.dumps(value))
-        put("-process.json", {"configuration": {"RECOMP_NV2A_GET_PROGRESS": "1" if progress else None,
+        put("-process.json", {"configuration": {"RECOMP_NV2A_GET_PROGRESS": "1" if progress else "0",
                                               "RECOMP_NV2A_GET_MONITOR": "1"}})
         put("-order.json", dict(records=6, discarded=lost, overwritten=0))
         put(".json", dict(exit_code=3, stopped=False, timed_out=False))
-        put("-guest-inspection.json", {"gpu": {"pfb_trap_active": pfb,"pfb_trap_matches_guest":pfb}})
+        put("-guest-inspection.json", {"gpu": {"pfb_trap_active": pfb,"pfb_trap_matches_guest":pfb,
+            "wait_monitor": {"checks": 5,"event_decisions": 2,"event_read_past": 0}}})
         prefix.with_name(prefix.name + ".stderr.log").write_text(
-            f"[PB GET] reads=100 far={far} invalid=0 untrusted=0 max_lag=3FC publications=2 freezes=0 backward=0 ring_calls=0\n")
+            f"[PB GET] reads=100 far={far} invalid=0 untrusted=0 max_lag=3FC publications=2 freezes=0 backward=0 ring_calls=0\n"
+            "[PB WAIT] checks=5 events=2 read_past=0\n")
         records = [(13, 0xF011, 4, 0, 0), (7, 0x80158B24, 0x1D70, 0xF011, 0),
                    (16, 0x80158B34, 0x1D90, 0, 0),
                    (14, 0xF011, 0x80158B20, 0x80158B00, 0 if progress else 0x58B8),
@@ -89,6 +91,17 @@ class QualificationTests(unittest.TestCase):
                 metadata["configuration"][flag] = ""
                 path.write_text(json.dumps(metadata))
                 self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"], flag)
+
+    def test_long_route_requires_direct_wait_observer(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            prefix = self.fixture(Path(directory))
+            log = prefix.with_name(prefix.name + ".stderr.log")
+            good = log.read_text()
+            for text in (good.replace("read_past=0", "read_past=1"),
+                         good.replace("checks=5", "checks=0"),
+                         good.split("[PB WAIT]")[0]):
+                log.write_text(text)
+                self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"])
 
 if __name__ == "__main__":
     unittest.main()

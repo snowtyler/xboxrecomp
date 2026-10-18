@@ -28,8 +28,8 @@ def summarize_monitor(prefix: Path):
     errors = []
     if config.get("RECOMP_NV2A_GET_MONITOR") != "1" or not monitor.get("reads"):
         errors.append("monitor missing or did not observe ring reads")
-    if config.get("RECOMP_NV2A_GET_PROGRESS") not in (None, "1"):
-        errors.append("ambiguous GET progress flag; remove it or set it to 1")
+    if config.get("RECOMP_NV2A_GET_PROGRESS") not in (None, "0", "1"):
+        errors.append("ambiguous GET progress flag; use 0 or 1")
     if gpu.get("pfb_trap_active") is not True or gpu.get("pfb_trap_matches_guest") is not True:
         errors.append("PFB trap not verified active")
     if any(config.get(k) is not None for k in ("RECOMP_NV2A_IRQ_GATE", "RECOMP_NV2A_PFB_POLL",
@@ -42,6 +42,17 @@ def summarize_monitor(prefix: Path):
             errors.append("monitor reports unsupported or failed execution")
             break
     progress = config.get("RECOMP_NV2A_GET_PROGRESS") == "1"
+    waits = re.findall(r"\[PB WAIT\] checks=(\d+) events=(\d+) read_past=(\d+)", log)
+    wait_monitor = dict(zip(("checks", "event_decisions", "event_read_past"), map(int, waits[-1]))) if waits else {}
+    snapshot_wait_monitor = gpu.get("wait_monitor", {})
+    if not wait_monitor.get("checks"):
+        errors.append("post-arm observer missing or did not observe SDK checks")
+    if not snapshot_wait_monitor.get("checks"):
+        errors.append("post-arm observer not verified in process snapshot")
+    if progress and any(int(row[2]) for row in waits):
+        errors.append("SDK selected event wait after reserved words were consumed")
+    if progress and snapshot_wait_monitor.get("event_read_past"):
+        errors.append("snapshot reports event wait after reserved fetch")
     if progress and (not monitor.get("publications") or any(row["far_reads"] or row["max_lag"] > 0x3FC for row in monitors)):
         errors.append("GET progress publication or lag invariant failed")
     if not progress and not monitor.get("far_reads"):
@@ -52,10 +63,12 @@ def summarize_monitor(prefix: Path):
     if failures:
         errors.append("runtime, pushbuffer or fence failure")
     return dict(name=prefix.name, progress=progress, configuration=config, monitor=monitor,
+                wait_monitor=wait_monitor,
+                snapshot_wait_monitor=snapshot_wait_monitor,
                 reports=len(monitors), automated_checks_passed=not errors, errors=errors,
                 failure_lines=failures[:20],
                 qualification_status="failed" if errors else "monitor_checks_passed_pending_visual_review",
-                limits="No ordered SDK-wait analysis; gameplay, death and replay require visual review.")
+                limits="O(1) post-arm observation without ordered trace; guest-state transitions and captures still require review.")
 
 def summarize(prefix: Path):
     def side(suffix):
@@ -136,12 +149,17 @@ def summarize(prefix: Path):
         errors.append("pushbuffer or fence failure")
     if any(monitor.get(k) for k in ("invalid_get", "untrusted_reads", "freezes", "backward_jumps", "ring_calls")):
         errors.append("monitor reports unsupported or failed execution")
-    progress = bool(config.get("RECOMP_NV2A_GET_PROGRESS"))
+    progress = config.get("RECOMP_NV2A_GET_PROGRESS") == "1"
+    wait_rows = re.findall(r"\[PB WAIT\] checks=(\d+) events=(\d+) read_past=(\d+)", log)
+    wait_monitor = dict(zip(("checks", "event_decisions", "event_read_past"), map(int, wait_rows[-1]))) if wait_rows else {}
+    if progress and wait_monitor.get("event_read_past"):
+        errors.append("direct observer reports event wait after reserved fetch")
     if progress and (monitor.get("far_reads") or monitor.get("max_lag",0)>0x3FC or already_read or waiting_age > 5):
         errors.append("GET progress invariant or graphics wait failed")
     if not progress and not monitor.get("far_reads"):
         errors.append("control did not expose stale GET")
     return dict(name=prefix.name, progress=progress, configuration=config, monitor=monitor,
+                wait_monitor=wait_monitor,
                 pfb_trap_active=pfb, pfb_trap_matches_guest=pfb_matches,
                 checks=checks, poll_entries=polls, event_paths=event_paths,
                 waits_after_slot_fetch=already_read, waits_after_placeholder_fetch=old_fetch,

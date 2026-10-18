@@ -36,6 +36,11 @@ int usb_gamepad_control(int pad, const UsbSetup *setup, uint8_t *out, int max);
 /* Fill in pad `pad`'s 20-byte input report. Returns the byte count written. */
 int usb_gamepad_report(int pad, uint8_t *out, int max);
 
+/* Completed guest flip ordinal, shared with optional flip-indexed scripts.
+ * The rendering thread publishes only after successful frame completion. */
+void usb_gamepad_set_guest_flip(uint32_t flip);
+uint32_t usb_gamepad_guest_flip(void);
+
 /* The address the host assigned pad `pad` with SET_ADDRESS, 0 until it does,
  * and whether it has been configured. */
 uint8_t usb_gamepad_address(int pad);

@@ -18,6 +18,14 @@
 
 #include <string.h>
 #include <ctype.h>
+#include "platform/xbox_winnt.h"
+#include "platform/win32_compat.h"
+
+static volatile LONG s_guest_flip;
+void usb_gamepad_set_guest_flip(uint32_t flip)
+{InterlockedExchange(&s_guest_flip,(LONG)flip);}
+uint32_t usb_gamepad_guest_flip(void)
+{return (uint32_t)InterlockedCompareExchange(&s_guest_flip,0,0);}
 
 /* ---- descriptors ------------------------------------------------------- */
 
@@ -291,6 +299,8 @@ static uint8_t synthetic_buttons(void)
  * from the first report the title asks for (so from enumeration, not from
  * process start) and a default hold of 150 ms. RECOMP_PAD_SCRIPT=@file reads
  * the same syntax from a file, one entry per line or comma separated.
+ * An f prefix uses absolute completed guest flips instead of milliseconds:
+ * f150:start:4 holds Start at flips 150..153. Its default hold is one flip.
  *
  * Buttons: up down left right start back lthumb rthumb (the digital byte),
  * a b x y black white lt rt (the analog bytes, reported fully pressed), and
@@ -316,6 +326,7 @@ typedef struct {
     uint8_t stick;           /* full deflection: 1 L-left 2 L-right 4 L-up
                                 8 L-down, then the same four for the right */
     int announced;
+    int by_flip;
 } PadStep;
 
 static PadStep s_script[PAD_SCRIPT_MAX];
@@ -377,7 +388,9 @@ static void pad_script_parse(const char *text)
         if (!*p)
             break;
         memset(&st, 0, sizeof st);
-        st.hold_ms = 150;
+        st.by_flip = *p == 'f';
+        if (st.by_flip) p++;
+        st.hold_ms = st.by_flip ? 1 : 150;
         st.at_ms = strtoul(p, &end, 0);
         if (end == p || *end != ':') {
             fprintf(stderr, "  PAD: script entry without <ms>: at \"%.20s\"\n", p);
@@ -437,7 +450,7 @@ static void pad_script_compact(unsigned long t)
 {
     int i, n = 0;
     for (i = 0; i < s_script_len; i++)
-        if (t < s_script[i].at_ms + s_script[i].hold_ms)
+        if ((s_script[i].by_flip ? usb_gamepad_guest_flip() : t) < s_script[i].at_ms + s_script[i].hold_ms)
             s_script[n++] = s_script[i];
     s_script_len = n;
 }
@@ -524,14 +537,23 @@ static void pad_script_apply(int pad, uint8_t *out)
         return;
     for (i = 0; i < s_script_len; i++) {
         PadStep *st = &s_script[i];
+        unsigned long clock = st->by_flip ? usb_gamepad_guest_flip() : t;
         if (st->pad != pad)
             continue;
-        if (t < st->at_ms || t >= st->at_ms + st->hold_ms)
+        if (clock < st->at_ms)
             continue;
+        if (clock >= st->at_ms + st->hold_ms) {
+            if (st->announced != 2) {
+                fprintf(stderr,"  PAD: %s step %d flip=%u\n",
+                    st->announced ? "release" : "missed",i,usb_gamepad_guest_flip());
+                st->announced=2;
+            }
+            continue;
+        }
         if (!st->announced) {
             st->announced = 1;
-            fprintf(stderr, "  PAD: t=%lu ms step %d (digital 0x%02X analog 0x%02X)\n",
-                    t, i, st->digital, st->analog);
+            fprintf(stderr, "  PAD: t=%lu %s step %d (digital 0x%02X analog 0x%02X) flip=%u\n",
+                    clock, st->by_flip ? "flips" : "ms", i, st->digital, st->analog,usb_gamepad_guest_flip());
             fflush(stderr);
         }
         out[2] |= st->digital;
@@ -560,7 +582,9 @@ int usb_gamepad_report(int pad, uint8_t *out, int max)
 {
     XBOX_INPUT_STATE state;
     const XBOX_GAMEPAD *g;
-    uint8_t synth = synthetic_buttons();
+    const char *exclusive_spec=getenv("RECOMP_PAD_SCRIPT_EXCLUSIVE");
+    int exclusive=exclusive_spec&&!strcmp(exclusive_spec,"1");
+    uint8_t synth = exclusive ? 0 : synthetic_buttons();
     int i;
 
     if (max < 20)
@@ -608,7 +632,7 @@ int usb_gamepad_report(int pad, uint8_t *out, int max)
     /* The synthetic press and the host pad drive pad n from host pad n. */
     if (pad != 0)
         synth = 0;
-    if (xbox_InputGetState((DWORD)pad, &state) != 0) {
+    if (exclusive || xbox_InputGetState((DWORD)pad, &state) != 0) {
         out[2] = synth;
         pad_script_apply(pad, out);
         return 20;

@@ -6,6 +6,12 @@ frozen; the corrected launcher has not changed the executable.
 
 ### October 18 upstream integration
 
+`CANDIDATE156_QUALIFICATION.md` supersedes the candidate153 observer details:
+long runs now have a direct post-arm read-past counter, parsed GET rollback,
+guarded guest death/replay evidence and flip-indexed controls/captures. The
+barrier replay gate and coalesced short pairs are independent. Default GET
+promotion waits for the barrier gameplay gate; coalescing remains separate.
+
 The follow-up sequence is now specified in `CANDIDATE153_QUALIFICATION.md`:
 repeat short-route pairs on the integrated executable, add a monitored
 barrier-mode GET-off control, then qualify barrier-mode GET-on gameplay,

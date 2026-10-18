@@ -117,6 +117,8 @@ static void guest_patch_step(void)
     case 5:
         /* PFB flush is a full barrier in the real default trap path. */
         guest_path=distance(record_address,visible,0,second_term,0)>=0x2000u?1:2;
+        nv2a_pb_get_wait_check(0xF011u,record_address,
+            distance(record_address,visible,0,second_term,0));
         if(guest_path==2) {
             W(record_address+8)=W(record_address+16)=0x40100;
             W(record_address+12)=W(record_address+20)=0;
@@ -139,6 +141,7 @@ static void read_hook(uint32_t va,unsigned kind)
 extern void nv2a_pb_bind_nop_record(uint32_t,uint32_t,uint32_t);
 static void reset(uint32_t start,uint32_t end,int exact)
 {
+    nv2a_pb_get_wait_reset();
     memset(memory+(LOW-BASE),0,0x4000);
     memset(memory+(START-BASE),0,END-START);
     memset(memory+(HIGH-BASE)-0x3000,0,0x3000);
@@ -183,7 +186,28 @@ static unsigned replica(unsigned k,int torn,int overwrite,int require_success)
     assert(slot==0xF015&&visible==END);
     if(require_success)assert(guest_path==2||(guest_path==1&&event_set));
     if(progress)assert(!g_nv2a_get_stats.far_reads&&g_nv2a_get_stats.max_lag<0x400);
+    uint64_t checks,events,past;
+    nv2a_pb_get_wait_stats(&checks,&events,&past);
+    if(progress)assert(!past);
     return read_index;
+}
+static void receipt_tests(void)
+{
+    uint64_t checks,events,past;
+    poison=0;reset(LOW,LOW+0x1000,1);release_at(LOW,0xF011);
+    scan(LOW,LOW+0x1000,1);
+    nv2a_pb_get_wait_check(0xF011,LOW+4,0x2000); /* wrong address */
+    nv2a_pb_get_wait_check(0xF091,LOW,0x2000);   /* same slot, wrong generation */
+    nv2a_pb_get_wait_check(0xF011,LOW,0);        /* correct poll decision */
+    nv2a_pb_get_wait_check(0xF011,LOW,0x2000);   /* retained past segment end */
+    nv2a_pb_get_wait_stats(&checks,&events,&past);
+    assert(checks==4&&events==3&&past==1);
+    release_at(LOW,0xF091);
+    nv2a_pb_get_submission(LOW+0x1000);scan(LOW,LOW+0x1000,1);
+    nv2a_pb_get_wait_check(0xF011,LOW,0x2000); /* recycled storage must not match */
+    nv2a_pb_get_wait_stats(&checks,&events,&past);assert(past==1);
+    nv2a_pb_get_wait_check(0xF091,LOW,0x2000);
+    nv2a_pb_get_wait_stats(&checks,&events,&past);assert(past==2);
 }
 static void protocol_tests(void)
 {
@@ -191,6 +215,10 @@ static void protocol_tests(void)
      * except that a release substitutes three headers plus three params. */
     unsigned k=(RECORD+24-START)/4;
     unsigned reads=replica(k,0,0,progress);
+    uint64_t checks,events,past;
+    nv2a_pb_get_wait_stats(&checks,&events,&past);
+    if(!progress)assert(checks==1&&events==1&&past==1);
+    else assert(checks<=1&&!events&&!past); /* may poll before arming */
     if(!progress)assert(guest_path==1&&!event_set&&g_nv2a_get_stats.far_reads);
     else assert(guest_path==2);
     uint64_t hash=stream_hash,pub=publish_hash;
@@ -293,7 +321,7 @@ int main(int argc,char **argv)
 {
     assert(argc==3);progress=atoi(argv[1]);coalesced=atoi(argv[2]);
     _putenv_s("RECOMP_PB_EXEC","1");_putenv_s("RECOMP_NV2A_GET_MONITOR","1");
-    _putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"");
+    _putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"0");
     _putenv_s("RECOMP_HW_RELEASE_COALESCE",coalesced?"1":"");
     memory=calloc(1,0x04000000);assert(memory);
     nv2a_pb_bind_nop_record(3,5,12);nv2a_pb_bind_read_hook(read_hook);
@@ -301,13 +329,13 @@ int main(int argc,char **argv)
     assert(distance(LOW+0x3000,LOW+0x1000,0,9,4)==0x2005);
     assert(distance(LOW,LOW+4,0,0,0)==0);
     assert(distance(LOW+0x3000,0,LOW+0x1001,0,0)==0x2000);
-    protocol_tests();
+    receipt_tests();protocol_tests();
     uint64_t hash=structural_tests(0);assert(hash==structural_tests(1));
     /* Publication and executed commands must agree with the other GET arm
      * on identical immutable streams, in either completion configuration. */
-    progress=!progress;_putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"");
+    progress=!progress;_putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"0");
     assert(hash==structural_tests(0));
-    progress=!progress;_putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"");
+    progress=!progress;_putenv_s("RECOMP_NV2A_GET_PROGRESS",progress?"1":"0");
     failure_tests();free(memory);
     printf("GET progress=%d coalesced=%d: protocol, storage reuse, control flow, failure checks passed\n",progress,coalesced);
     return 0;

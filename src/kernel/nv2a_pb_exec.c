@@ -33,6 +33,8 @@
 #include "kernel.h"   /* XBOX_CONTIG_BASE / XBOX_CONTIG_SIZE */
 #include "xbox_memory_layout.h"   /* xbox_Nv2aFrameCounterFlip */
 #include "nv2a_order_trace.h"
+#include "nv2a_flip_capture.h"
+#include "../usb/usb_gamepad.h"
 #include "../video/fb_gpu_present.h"
 /* The swizzle decoder the D3D8 layer already uses -- one implementation of
  * Morton order, not a second one that can disagree with it. */
@@ -624,6 +626,7 @@ static uint32_t surface_bpp(void)
  * after-draw dumps stand down then, or they would put duplicate frames into
  * the sequence. */
 static int s_flip_dumping;
+static uint32_t s_capture_guest_flip;
 
 static void dump_surface_bmp_at(uint32_t alternate_offset)
 {
@@ -652,7 +655,9 @@ static void dump_surface_bmp_at(uint32_t alternate_offset)
     pad = (4 - (row_bytes & 3)) & 3;
     filesz = 54 + (row_bytes + pad) * h;
 
-    if (alternate_offset)
+    if (s_capture_guest_flip && !alternate_offset)
+        snprintf(path, sizeof path, "%sguest-flip-%010u.bmp", prefix, s_capture_guest_flip);
+    else if (alternate_offset)
         snprintf(path, sizeof path, "%salt-%08X-%05d.bmp", prefix, offset, seq++);
     else
         snprintf(path, sizeof path, "%s%05d.bmp", prefix, seq++);
@@ -696,6 +701,8 @@ static void dump_surface_bmp_at(uint32_t alternate_offset)
         }
     }
     fclose(f);
+    if (s_capture_guest_flip && !alternate_offset)
+        fprintf(stderr,"[FRAME CAPTURE] flip=%u surface=%08X path=\"%s\"\n",s_capture_guest_flip,offset,path);
     if (seq == 1)
         fprintf(stderr, "  [GPU] framebuffer dump: %s (%ux%u from 0x%08X %ubpp)\n",
                 path, w, h, s_gpu.color_offset, bpp);
@@ -3366,6 +3373,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         /* This is a completed swap, which is what a title's own swap
          * counter counts -- see xbox_Nv2aFrameCounterFlip. */
         xbox_Nv2aFrameCounterFlip();
+        usb_gamepad_set_guest_flip(s_gpu.flips);
         nv2a_hw_perf_report();
         /* Hand the window a copy of the frame just finished.
          *
@@ -3426,17 +3434,28 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
              * exists, so a capture can start mid-game without writing
              * gigabytes of menus first. */
             static const char *spec = (const char *)-1;
+            static const char *flip_spec = (const char *)-1;
             if (spec == (const char *)-1)
                 spec = getenv("RECOMP_FB_DUMP_FLIPS");
-            if (spec) {
-                int on = strcmp(spec, "1") == 0;
-                if (!on) {
+            if (flip_spec == (const char *)-1)
+                flip_spec = getenv("RECOMP_FB_DUMP_GUEST_FLIPS");
+            if (spec || flip_spec) {
+                int exact = nv2a_flip_capture_contains(flip_spec,s_gpu.flips);
+                int on = spec && strcmp(spec, "1") == 0;
+                if (exact < 0) {
+                    fprintf(stderr,"[FRAME CAPTURE ERROR] malformed guest flip specification\n");
+                    flip_spec=NULL;exact=0;
+                }
+                if (!on && spec) {
                     FILE *f = fopen(spec, "rb");
                     if (f) { fclose(f); on = 1; }
                 }
+                on |= exact;
                 s_flip_dumping = on;
+                s_capture_guest_flip=exact?s_gpu.flips:0;
                 if (on)
                     dump_surface_bmp();
+                s_capture_guest_flip=0;
             }
         }
         s_gpu.drawn_stale = 1;

@@ -69,6 +69,8 @@ if(BRUTE_FORCE_E3_GET_TRACE_HOOKS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/install_get_hooks.py"
         COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/install_guest_state_hooks.py"
+        COMMAND_ERROR_IS_FATAL ANY)
 endif()
 
 # The recomp pipeline also generates a dispatch header and function declarations.

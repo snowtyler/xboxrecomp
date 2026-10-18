@@ -2,6 +2,7 @@
 import argparse, ctypes as c, json
 from ctypes import wintypes as w
 from pathlib import Path
+from guest_state import snapshot_game_state
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--pid',type=int,required=True);p.add_argument('--tid',type=int,help='Defaults to the oldest thread owned by this process')
 p.add_argument('--output',type=Path,required=True)
@@ -77,11 +78,12 @@ t=None
 try:
     for name in ['g_memory_offset','g_state','g_nv2a_notify_pending','g_nv2a_memory',
                  'g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed','g_pending_fences',
-                 's_irq_line','g_irql_raised_count','g_nv2a_get_stats','g_pfb_page',
+                 's_irq_line','g_irql_raised_count','g_nv2a_get_stats','g_nv2a_wait_stats','g_pfb_page',
                  '_tls_index','g_eax','g_ecx','g_edx','g_esp','g_ebp','g_esi','g_edi']:
         try:result['symbols'][name]=sym(name)
         except OSError as e:result['symbols'][name]={'error':str(e)}
     offset=uint(result['symbols']['g_memory_offset']['address'],8)
+    result['guest']['game_state']=snapshot_game_state(lambda address,size:read(offset+address,size),include_dumps=True)
     dev=uint(offset+0x003AB378);result['guest']['device']=hex(dev)
     if dev:
         result['guest']['device_fields']={hex(x):hex(uint(offset+dev+x)) for x in
@@ -121,6 +123,10 @@ try:
             offsets=members(stats['base'],stats['type'])
             gpu['get_monitor']={key:uint(stats['address']+at,4 if key in ('max_lag','last_read') else 8)
                                 for key,at in offsets.items()}
+        waits=result['symbols']['g_nv2a_wait_stats']
+        if 'address' in waits:
+            gpu['wait_monitor']={key:uint(waits['address']+at,8)
+                                 for key,at in members(waits['base'],waits['type']).items()}
         gpu['notify_pending']=uint(variable_address('g_nv2a_notify_pending'))
         gpu['fence_batch']={name:uint(variable_address(name)) for name in
             ['g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed']}

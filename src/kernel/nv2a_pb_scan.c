@@ -25,6 +25,11 @@
 #include <stddef.h>   /* ptrdiff_t */
 #include <stdlib.h>
 #include <string.h>
+#include "nv2a_get_config.h"
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 #include "nv2a_hw_raster.h"
 #include "nv2a_order_trace.h"
 #include "nv2a_pb_scan.h"
@@ -157,7 +162,7 @@ void nv2a_pb_scan_report(void)
 {
     int i;
 
-    if(getenv("RECOMP_NV2A_GET_MONITOR")) {
+    if(nv2a_get_monitor_enabled()) {
         extern Nv2aGetStats g_nv2a_get_stats;
         Nv2aGetStats *s=&g_nv2a_get_stats;
         fprintf(stderr,"[PB GET] reads=%llu far=%llu invalid=%llu untrusted=%llu max_lag=%X publications=%llu freezes=%llu backward=%llu ring_calls=%llu\n",
@@ -165,6 +170,10 @@ void nv2a_pb_scan_report(void)
             (unsigned long long)s->invalid_get,(unsigned long long)s->untrusted_reads,s->max_lag,
             (unsigned long long)s->publications,(unsigned long long)s->freezes,
             (unsigned long long)s->backward_jumps,(unsigned long long)s->ring_calls);
+        uint64_t checks,events,past;
+        nv2a_pb_get_wait_stats(&checks,&events,&past);
+        fprintf(stderr,"[PB WAIT] checks=%llu events=%llu read_past=%llu\n",
+            (unsigned long long)checks,(unsigned long long)events,(unsigned long long)past);
     }
 
     if (s_exec_enabled > 0) {
@@ -207,6 +216,57 @@ static uint32_t s_get_final, s_get_last;
 static uint32_t (*s_get_read)(void);
 static void (*s_get_publish)(uint32_t);
 Nv2aGetStats g_nv2a_get_stats;
+
+/* The SDK selects one of 64 records by (serial >> 1) & 63. A receipt binds
+ * the exact release instance AND address, so wrap/reuse, completed segments
+ * and unrelated subroutine reads cannot masquerade as this release. Publish
+ * only AFTER the actual reserved final dword load, not get_before_read.
+ * Only release/final-word observations touch these atomics; no per-word
+ * atomic cursor, guest memory write, lock, allocation or trace-ring entry. */
+#ifdef _WIN32
+typedef int64_t GetAtomic;
+static uint64_t get_load(volatile GetAtomic *p)
+{return (uint64_t)InterlockedCompareExchange64(p,0,0);}
+static void get_store(volatile GetAtomic *p,uint64_t v)
+{InterlockedExchange64(p,(LONG64)v);}
+static void get_increment(volatile GetAtomic *p){InterlockedIncrement64(p);}
+#else
+typedef int64_t GetAtomic;
+static uint64_t get_load(volatile GetAtomic *p){return __atomic_load_n(p,__ATOMIC_ACQUIRE);}
+static void get_store(volatile GetAtomic *p,uint64_t v){__atomic_store_n(p,v,__ATOMIC_RELEASE);}
+static void get_increment(volatile GetAtomic *p){__atomic_add_fetch(p,1,__ATOMIC_RELAXED);}
+#endif
+static volatile GetAtomic s_wait_receipts[64];
+Nv2aWaitStats g_nv2a_wait_stats;
+static uint32_t s_wait_end,s_wait_serial,s_wait_command;
+#ifdef NV2A_PB_TEST_HOOKS
+void nv2a_pb_get_wait_reset(void)
+{
+    for(unsigned i=0;i<64;i++)get_store(&s_wait_receipts[i],0);
+    get_store(&g_nv2a_wait_stats.checks,0);get_store(&g_nv2a_wait_stats.event_decisions,0);get_store(&g_nv2a_wait_stats.event_read_past,0);
+    s_wait_end=0;
+}
+#endif
+void nv2a_pb_get_wait_stats(uint64_t *checks,uint64_t *events,uint64_t *past)
+{*checks=get_load(&g_nv2a_wait_stats.checks);*events=get_load(&g_nv2a_wait_stats.event_decisions);*past=get_load(&g_nv2a_wait_stats.event_read_past);}
+void nv2a_pb_get_wait_check(uint32_t serial,uint32_t command,uint32_t distance)
+{
+    if(!nv2a_get_monitor_enabled())return;
+    get_increment(&g_nv2a_wait_stats.checks);
+    if(distance<0x2000u)return; /* Correct GET may choose polling after a read. */
+    get_increment(&g_nv2a_wait_stats.event_decisions);
+    uint64_t identity=((uint64_t)serial<<32)|command;
+    if(command && get_load(&s_wait_receipts[(serial>>1)&63])==identity)
+        get_increment(&g_nv2a_wait_stats.event_read_past);
+}
+static void get_after_load(uint32_t va)
+{
+    if(s_get_monitor&&s_wait_end&&va==s_wait_end) {
+        get_store(&s_wait_receipts[(s_wait_serial>>1)&63],
+            ((uint64_t)s_wait_serial<<32)|s_wait_command);
+        s_wait_end=0;
+    }
+}
 #ifdef NV2A_PB_TEST_HOOKS
 static void (*s_read_hook)(uint32_t,unsigned);
 void nv2a_pb_bind_read_hook(void (*hook)(uint32_t,unsigned)){s_read_hook=hook;}
@@ -220,8 +280,8 @@ void nv2a_pb_bind_get_io(uint32_t (*read_get)(void),void (*publish)(uint32_t))
 void nv2a_pb_get_submission(uint32_t final_put)
 {
     s_get_final=final_put;s_get_frozen=0;
-    s_get_enabled=getenv("RECOMP_NV2A_GET_PROGRESS")!=NULL;
-    s_get_monitor=getenv("RECOMP_NV2A_GET_MONITOR")!=NULL;
+    s_get_enabled=nv2a_get_progress_enabled();
+    s_get_monitor=nv2a_get_monitor_enabled();
     s_get_last=s_get_read?s_get_read():0;
 }
 static int get_in_ring(uint32_t va){return va>=s_ring_low&&va<s_ring_high;}
@@ -308,7 +368,7 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
         int resumed=s_pending_count&&va==s_pending_va;
         if(s_pending_count&&!resumed){static unsigned missed;if(missed++<12)fprintf(stderr,"[PB RESUME] expected=%08X got=%08X remaining=%u\n",s_pending_va,va,s_pending_count);}
         if(s_pending_count&&!resumed)get_freeze(va,5);
-        if(!resumed){get_before_read(va,!child&&!return_va);PB_READ_HOOK(va,0);w=*(const uint32_t*)(mem+va);va+=4;words++; unsigned slot=s_header_count++&63;s_headers[slot].va=from;s_headers[slot].word=w;}
+        if(!resumed){get_before_read(va,!child&&!return_va);PB_READ_HOOK(va,0);w=*(const uint32_t*)(mem+va);get_after_load(va);va+=4;words++; unsigned slot=s_header_count++&63;s_headers[slot].va=from;s_headers[slot].word=w;}
         if(!resumed&&((w&3)==1||(w&0xE0000003u)==0x20000000u)) {
             uint32_t physical=(w&3)==1?w&0xFFFFFFFCu:w&0x1FFFFFFCu;
             uint32_t target=XBOX_CONTIG_BASE|(physical&0x0FFFFFFFu);(*jumps)++;
@@ -348,6 +408,11 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
             if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);return words;}
             get_before_read(va,!child&&!return_va);PB_READ_HOOK(va,1);
             uint32_t m=noninc?method:method+i*4,parameter=*(const uint32_t*)(mem+va);va+=4;words++;
+            get_after_load(va-4);
+            if(s_get_monitor&&s_ring_exact&&!child&&!return_va&&subch==0&&m==0x1D70) {
+                s_wait_serial=parameter;s_wait_command=va-8;s_wait_end=s_wait_command+20;
+                get_store(&s_wait_receipts[(parameter>>1)&63],0);
+            }
             if(subch==0 && ((m==0x100&&parameter)||m==0x1D70))
                 nv2a_order_trace(NV_ORDER_COMMAND,va-4,m,parameter,0);
             if(s_get_monitor&&subch==0&&(m==0x100||m==0x110||m==0x1D90))
@@ -368,6 +433,7 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
                 if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+record,s_nop_next+4)){pb_reject(unknown);return words;}
                 get_before_read(record+s_nop_next,0);PB_READ_HOOK(record+s_nop_next,2);
                 uint32_t next=*(const uint32_t*)(mem+record+s_nop_next);
+                get_after_load(record+s_nop_next);
                 if((next&3)||next<record+s_nop_next+4||next>end_va){fprintf(stderr,"[PB ERROR] bad NOP continuation=%08X record=%08X\n",next,record);pb_reject(unknown);return words;}
                 va=next;
             }

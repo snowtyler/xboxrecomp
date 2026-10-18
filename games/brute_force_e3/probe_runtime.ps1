@@ -11,6 +11,7 @@ param(
     [double]$SampleFrom = -1,
     [double]$SampleFor = 10,
     [double]$InspectFrom = -1,
+    [double]$StateInterval = 0,
     [switch]$Measure,
     [string]$PadScript = '5000:start:400,8000:a:400,12000:down:400,16000:a:400'
 )
@@ -36,5 +37,5 @@ $env:RECOMP_FRAME_TRACE_VERTICES = if ($Vertices) { '1' } else { $null }
 $env:RECOMP_PAD_SCRIPT = $PadScript
 [string[]]$measureTask = @()
 if ($Measure) { $measureTask = @('--measure') }
-& python (Join-Path $PSScriptRoot 'probe.py') --seconds $Seconds --name $Name --exe $Executable --stop-file (Join-Path $analysisTask "$Name-stop.flag") --capture-from $CaptureFrom --capture-for $CaptureFor --captures $Captures --sample-from $SampleFrom --sample-for $SampleFor --inspect-from $InspectFrom @measureTask
+& python (Join-Path $PSScriptRoot 'probe.py') --seconds $Seconds --name $Name --exe $Executable --stop-file (Join-Path $analysisTask "$Name-stop.flag") --capture-from $CaptureFrom --capture-for $CaptureFor --captures $Captures --sample-from $SampleFrom --sample-for $SampleFor --inspect-from $InspectFrom --state-interval $StateInterval @measureTask
 if ($LASTEXITCODE -ne 0) { throw 'Probe runner failed.' }

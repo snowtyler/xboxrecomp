@@ -3,6 +3,7 @@ param(
     [string]$Executable = 'brute_force_e3_prototype.exe',
     [switch]$SoftwareVertex,
     [switch]$TextureEpoch,
+    [switch]$DisableGetProgress,
     [switch]$Audio = $true
 )
 $ErrorActionPreference = 'Stop'
@@ -42,9 +43,11 @@ $settingsTask = @{
     RECOMP_AUDIO_MUTE = $(if ($Audio) { $null } else { '1' })
     RECOMP_WATCHDOG_SECS = $null
     RECOMP_PAD_SCRIPT = $null
+    RECOMP_PAD_SCRIPT_EXCLUSIVE = $null
     RECOMP_PAD_LIVE = $null
     RECOMP_FB_DUMP = $null
     RECOMP_FB_DUMP_FLIPS = $null
+    RECOMP_FB_DUMP_GUEST_FLIPS = $null
     RECOMP_FRAME_TRACE = $null
     RECOMP_SDK_WRITER_TRACE = $null
     RECOMP_SDK_JOURNAL_DUMP = $null
@@ -68,8 +71,9 @@ $settingsTask = @{
     RECOMP_NV2A_PFB_POLL = $null
     RECOMP_NV2A_IRQ_GATE = $null
     RECOMP_NV2A_ORDER_TRACE = $null
-    RECOMP_NV2A_GET_PROGRESS = $null
+    RECOMP_NV2A_GET_PROGRESS = $(if ($DisableGetProgress -or [Environment]::GetEnvironmentVariable('RECOMP_NV2A_GET_PROGRESS') -ceq '0') { '0' } else { $null })
     RECOMP_NV2A_GET_MONITOR = $null
+    RECOMP_BRUTE_FORCE_ROUTE_STATE = $null
     RECOMP_EVENT_TRACE = $null
     RECOMP_PEEK = $null
     RECOMP_INPUT_TRACE = $null
