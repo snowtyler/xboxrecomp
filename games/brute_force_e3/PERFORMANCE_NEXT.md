@@ -4,6 +4,37 @@ Planning baseline: October 14, 2026. This is a proposed sequence, not enabled
 behavior or a promised speedup. Candidate149 and its existing evidence remain
 frozen; the corrected launcher has not changed the executable.
 
+### October 14 GET implementation update
+
+The current experiment follows `review/opus55/IRQ_GET_RESPONSE.md` and the
+implementation record `review/opus55/GET_PROGRESS.md`. Candidate151 adds
+independent, default-off `RECOMP_NV2A_GET_PROGRESS` and
+`RECOMP_NV2A_GET_MONITOR` flags. Keep the IRQ gate off in every GET arm.
+
+The deterministic fixture reproduces the missed action-5 wakeup with progress
+off and exercises every read-point interleaving, torn patches and immediate
+command-storage reuse. GET progress requires SDK-verified ring bounds, uses
+full-barrier stores at a 0x400-byte stride, holds at CALL return addresses,
+and freezes on parser or handler failures. Backward ring jumps and in-ring
+CALLs are unsupported for this experiment and invalidate qualification.
+Completion and semaphore publication rules, and the final GET=PUT store,
+retain their existing behavior.
+
+Qualification proceeds through the monitored short route, normal-barrier full
+gameplay/replay gates, coalesced full gates, then performance. A short-route
+watchdog exit is not a correctness pass. The monitor must see stale GET in
+controls and no bound violations in progress arms; wait hooks, active PFB
+trapping, failures and captures must also be checked. Neither GET progress nor
+coalescing has been promoted. The earlier IRQ proposal below is historical.
+
+The five candidate151 short-route pairs are complete: all five progress arms
+kept maximum GET lag at 0x3FC across 148,161,279 ring reads, with zero bound
+violations, unsupported control flow or waits after reserved-slot fetches.
+Four controls reproduced the lost wakeup; the fifth progressed despite stale
+GET. This qualifies the monitored short-route invariant only. Pixel artifacts
+remain visible in coalesced captures, and full gameplay/replay gates are still
+required. See `review/opus55/GET_PROGRESS.md` for results and limitations.
+
 ### October 14 review update: diagnose coalescing first
 
 Claude's `review/opus55/ANSWERS_RESPONSE.md` moves the coalescing stall ahead of

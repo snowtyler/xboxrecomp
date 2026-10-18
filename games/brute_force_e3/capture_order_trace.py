@@ -7,6 +7,8 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import time
 
 p=argparse.ArgumentParser(description=__doc__)
@@ -36,8 +38,10 @@ def read(address,size):
     if not k.ReadProcessMemory(h,address,b,size,c.byref(got)) or got.value!=size:raise OSError(c.get_last_error(),'Read ring')
     return b.raw
 meta=dict(pid=a.pid,exe=str(exe),sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
+          observer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
           capacity=65536,record_size=48,discarded=0,overwritten=0,records=0)
 last=0;deadline=time.monotonic()+a.seconds
+event_waits={};executor_tid=None;stall_captured=False;latest_qpc=0
 try:
     ring=symbol('g_nv2a_order_ring');sequence=symbol('g_nv2a_order_sequence');frequency=symbol('g_nv2a_order_frequency')
     with a.output.open('x',newline='') as stream:
@@ -55,7 +59,30 @@ try:
                         meta['discarded']+=1;continue
                     writer.writerow([number,qpc,qpc/freq,tid,event,*[f'0x{v:08X}' for v in (x,y,z,t)]])
                     meta['records']+=1
+                    latest_qpc=qpc/freq
+                    if event==1 and x==0x003AAC9C:
+                        if y==2:event_waits[tid]=latest_qpc
+                        elif y==3:event_waits.pop(tid,None)
+                    if event in (7,16):executor_tid=tid
                 last=head;stream.flush()
+                # A late stall can occur after the probe's scheduled snapshot.
+                # Read only after the event has stayed blocked for five seconds;
+                # never suspend threads or alter the guest to unstick it.
+                if event_waits and not stall_captured and latest_qpc-min(event_waits.values())>5:
+                    stall_captured=True;meta['stall_snapshots']=[]
+                    prefix=a.output.stem.removesuffix('-order')
+                    for label,thread in [('guest',None),('executor',executor_tid)]:
+                        if label=='executor' and thread is None:continue
+                        output=a.output.with_name(f'{prefix}-stall-{label}-inspection.json')
+                        command=[sys.executable,str(Path(__file__).with_name('inspect_guest.py')),
+                                 '--pid',str(a.pid),'--output',str(output)]
+                        if thread is not None:command+=['--tid',str(thread)]
+                        try:
+                            result=subprocess.run(command,timeout=4,capture_output=True,text=True)
+                            meta['stall_snapshots'].append(dict(path=output.name,exit_code=result.returncode,
+                                                               stderr=result.stderr[-1000:]))
+                        except subprocess.TimeoutExpired:
+                            meta['stall_snapshots'].append(dict(path=output.name,error='snapshot timeout'))
             time.sleep(.5)
 except OSError as error:
     meta['read_error']=str(error)

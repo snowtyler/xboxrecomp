@@ -57,10 +57,18 @@ set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
     src/recomp_cpu.c
+    src/recomp_get_trace.c
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c
 )
+
+option(BRUTE_FORCE_E3_GET_TRACE_HOOKS "Install read-only SDK wait diagnostics" OFF)
+if(BRUTE_FORCE_E3_GET_TRACE_HOOKS)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/install_get_hooks.py"
+        COMMAND_ERROR_IS_FATAL ANY)
+endif()
 
 # The recomp pipeline also generates a dispatch header and function declarations.
 # These are included by the generated .c files:

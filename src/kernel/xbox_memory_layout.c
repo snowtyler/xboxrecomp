@@ -17,6 +17,7 @@
 #include "guest_vmem.h"
 #include "nv2a_hw_raster.h"
 #include "nv2a_order_trace.h"
+#include "nv2a_pb_scan.h"
 #include "../video/fb_gpu_present.h"
 #include "../platform/mmio_decode.h"
 #include <stdio.h>
@@ -370,6 +371,17 @@ static const struct { uint32_t offset; uint32_t idle_mask; } NV2A_IDLE[] = {
 #define NV2A_USER_DMA_PUT 0x800040u
 #define NV2A_USER_DMA_GET 0x800044u
 
+static uint32_t nv2a_get_read(void)
+{
+    return *(volatile uint32_t*)((char*)g_nv2a_memory+NV2A_USER_DMA_GET)|XBOX_CONTIG_BASE;
+}
+static void nv2a_get_publish(uint32_t va)
+{
+    /* Order this publication before all subsequent command loads. */
+    InterlockedExchange((volatile LONG*)((char*)g_nv2a_memory+NV2A_USER_DMA_GET),
+                        (LONG)(va&0x0FFFFFFFu));
+}
+
 /*
  * The same channel's pointers on the PFIFO side of the aperture.
  *
@@ -721,6 +733,7 @@ int xbox_Nv2aFenceBatchActive(void)
 {
     return g_fence_batch_depth!=0;
 }
+int xbox_Nv2aFenceBatchFailed(void){return g_fence_batch_failed!=0;}
 void xbox_Nv2aFenceBatchFail(void)
 {
     if(g_fence_batch_depth) {
@@ -1197,6 +1210,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                      * little short of the true end costs the same commands
                      * that were being lost anyway. */
                     static uint32_t put_lo, put_hi;
+                    int sdk_bounds=0;
                     if (!put_lo || put < put_lo) put_lo = put;
                     if (put > put_hi) put_hi = put;
                     if(g_ring_binding.device_ptr_va&&fence_readable(g_ring_binding.device_ptr_va,4)) {
@@ -1209,11 +1223,14 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                                 static uint32_t last_low,last_high;
                                 if(lo!=last_low||hi!=last_high){fprintf(stderr,"[PB RING] SDK bounds %08X..%08X observed PUT=%08X\n",lo,hi,put);last_low=lo;last_high=hi;}
                                 put_lo=lo;put_hi=hi;
+                                sdk_bounds=1;
                             }
                         }
                     }
-                    extern void nv2a_pb_set_ring_bounds(uint32_t,uint32_t);
-                    nv2a_pb_set_ring_bounds(XBOX_CONTIG_BASE|(put_lo&0x0FFFFFFFu),XBOX_CONTIG_BASE|(put_hi&0x0FFFFFFFu));
+                    nv2a_pb_set_ring_bounds_verified(XBOX_CONTIG_BASE|(put_lo&0x0FFFFFFFu),
+                        XBOX_CONTIG_BASE|(put_hi&0x0FFFFFFFu),sdk_bounds);
+                    nv2a_pb_bind_get_io(nv2a_get_read,nv2a_get_publish);
+                    nv2a_pb_get_submission(XBOX_CONTIG_BASE|(put&0x0FFFFFFFu));
                     if (last_put && put > last_put) {
                         nv2a_pb_scan(XBOX_CONTIG_BASE | (last_put & 0x0FFFFFFFu),
                                      XBOX_CONTIG_BASE | (put      & 0x0FFFFFFFu));

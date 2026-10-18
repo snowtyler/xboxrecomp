@@ -27,6 +27,7 @@
 #include <string.h>
 #include "nv2a_hw_raster.h"
 #include "nv2a_order_trace.h"
+#include "nv2a_pb_scan.h"
 
 #ifndef XBOX_CONTIG_BASE
 #define XBOX_CONTIG_BASE 0x80000000u   /* physical P is at this + P */
@@ -37,6 +38,7 @@ extern size_t xbox_GetMappedSize(void);
 extern uint32_t xbox_ContiguousAllocatedBytes(void);
 extern void xbox_Nv2aFenceBatchBegin(void);
 extern int xbox_Nv2aFenceBatchHasRelease(void);
+extern int xbox_Nv2aFenceBatchFailed(void);
 extern void xbox_Nv2aFenceBatchFail(void);
 extern void xbox_Nv2aFenceBatchEnd(int);
 extern int nv2a_hw_sync(void);
@@ -155,6 +157,16 @@ void nv2a_pb_scan_report(void)
 {
     int i;
 
+    if(getenv("RECOMP_NV2A_GET_MONITOR")) {
+        extern Nv2aGetStats g_nv2a_get_stats;
+        Nv2aGetStats *s=&g_nv2a_get_stats;
+        fprintf(stderr,"[PB GET] reads=%llu far=%llu invalid=%llu untrusted=%llu max_lag=%X publications=%llu freezes=%llu backward=%llu ring_calls=%llu\n",
+            (unsigned long long)s->reads,(unsigned long long)s->far_reads,
+            (unsigned long long)s->invalid_get,(unsigned long long)s->untrusted_reads,s->max_lag,
+            (unsigned long long)s->publications,(unsigned long long)s->freezes,
+            (unsigned long long)s->backward_jumps,(unsigned long long)s->ring_calls);
+    }
+
     if (s_exec_enabled > 0) {
         nv2a_pb_exec_report();
         fprintf(stderr, "[PB] %u pushbuffer calls followed\n", s_tot_calls);
@@ -190,6 +202,63 @@ static int pb_readable(uint32_t va,uint32_t bytes)
     return va>=0x10000u&&(uint64_t)va+bytes<=xbox_GetMappedSize();
 }
 static uint32_t s_ring_low, s_ring_high, s_nop_action, s_nop_shift, s_nop_next;
+static int s_ring_exact, s_get_enabled, s_get_monitor, s_get_frozen;
+static uint32_t s_get_final, s_get_last;
+static uint32_t (*s_get_read)(void);
+static void (*s_get_publish)(uint32_t);
+Nv2aGetStats g_nv2a_get_stats;
+#ifdef NV2A_PB_TEST_HOOKS
+static void (*s_read_hook)(uint32_t,unsigned);
+void nv2a_pb_bind_read_hook(void (*hook)(uint32_t,unsigned)){s_read_hook=hook;}
+#define PB_READ_HOOK(va,kind) do {if(s_read_hook)s_read_hook(va,kind);} while(0)
+#else
+#define PB_READ_HOOK(va,kind) ((void)0)
+#endif
+
+void nv2a_pb_bind_get_io(uint32_t (*read_get)(void),void (*publish)(uint32_t))
+{s_get_read=read_get;s_get_publish=publish;}
+void nv2a_pb_get_submission(uint32_t final_put)
+{
+    s_get_final=final_put;s_get_frozen=0;
+    s_get_enabled=getenv("RECOMP_NV2A_GET_PROGRESS")!=NULL;
+    s_get_monitor=getenv("RECOMP_NV2A_GET_MONITOR")!=NULL;
+    s_get_last=s_get_read?s_get_read():0;
+}
+static int get_in_ring(uint32_t va){return va>=s_ring_low&&va<s_ring_high;}
+static void get_freeze(uint32_t pc,unsigned reason)
+{
+    if(s_get_frozen)return;
+    s_get_frozen=1;
+    if(s_get_enabled||s_get_monitor) {
+        ++g_nv2a_get_stats.freezes;
+        nv2a_order_trace(NV_ORDER_GET_BOUND,pc,s_get_last,reason,0);
+        fprintf(stderr,"[PB GET] frozen at %08X pc=%08X reason=%u; final policy PUT\n",s_get_last,pc,reason);
+    }
+}
+static void get_progress(uint32_t va,int force)
+{
+    if(!s_get_enabled||!s_get_publish||!s_ring_exact||s_get_frozen)return;
+    if(xbox_Nv2aFenceBatchFailed()){get_freeze(va,2);return;}
+    if(!get_in_ring(va)||va==s_get_final||va==s_get_last)return;
+    if(!force && (va<s_get_last || va-s_get_last<0x400u))return;
+    s_get_publish(va);s_get_last=va;++g_nv2a_get_stats.publications;
+    nv2a_order_trace(NV_ORDER_GET,va,0,0,0);
+}
+static void get_before_read(uint32_t va,int root)
+{
+    if(root)get_progress(va,0);
+    if(!s_get_monitor||!s_get_read||!get_in_ring(va))return;
+    ++g_nv2a_get_stats.reads;g_nv2a_get_stats.last_read=va;
+    if(!s_ring_exact){++g_nv2a_get_stats.untrusted_reads;return;}
+    uint32_t visible=s_get_read();
+    if(!get_in_ring(visible)){++g_nv2a_get_stats.invalid_get;return;}
+    uint32_t lag=va>=visible?va-visible:s_ring_high-visible+va-s_ring_low;
+    if(lag>g_nv2a_get_stats.max_lag)g_nv2a_get_stats.max_lag=lag;
+    if(lag>=0x1C00u) {
+        if(!g_nv2a_get_stats.far_reads)nv2a_order_trace(NV_ORDER_GET_BOUND,va,visible,0,lag);
+        ++g_nv2a_get_stats.far_reads;
+    }
+}
 static uint32_t s_pending_count,s_pending_method,s_pending_subch,s_pending_noninc,s_pending_va;
 static uint32_t s_last_nop;
 static struct {uint32_t from,word,target;} s_branches[32];
@@ -200,6 +269,7 @@ static void (*s_failure_trace)(void);
 static void pb_reject(uint32_t *unknown)
 {
     ++*unknown;
+    get_freeze(0,1);
     /* A later trapped method must not publish releases from a prefix whose
      * command walk has already failed. Earlier completed prefixes stay valid. */
     if(s_exec_enabled)xbox_Nv2aFenceBatchFail();
@@ -218,7 +288,10 @@ static void pb_capture_first(uint32_t root_start,uint32_t root_end,uint32_t pc,u
         FILE *f=fopen(dump,"wb");if(f){fwrite((const uint8_t*)xbox_GetMemoryOffset()+root_start,1,root_end-root_start,f);fclose(f);}
     }
 }
-void nv2a_pb_set_ring_bounds(uint32_t low,uint32_t high) {s_ring_low=low;s_ring_high=high;}
+void nv2a_pb_set_ring_bounds_verified(uint32_t low,uint32_t high,int sdk_bounds)
+{s_ring_low=low;s_ring_high=high;s_ring_exact=sdk_bounds&&low<high&&!(low&3)&&!(high&3);}
+void nv2a_pb_set_ring_bounds(uint32_t low,uint32_t high)
+{nv2a_pb_set_ring_bounds_verified(low,high,0);}
 void nv2a_pb_bind_nop_record(uint32_t action,uint32_t shift,uint32_t next_offset)
 {s_nop_action=action;s_nop_shift=shift;s_nop_next=next_offset;}
 static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,uint32_t *unknown)
@@ -226,21 +299,30 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
     const uint8_t *mem=(const uint8_t*)xbox_GetMemoryOffset();
     uint32_t root_start=va,root_end=end_va,return_va=0,words=0;int child=0;
     (void)ignored;
+    /* Only an exact SDK seam may advance GET into a new lap. */
+    if(s_ring_exact&&va==s_ring_low&&s_get_last>va)get_progress(va,1);
     while(va<end_va&&words<0x100000u) {
         if(!pb_readable(va,4)){pb_capture_first(root_start,root_end,va,0);fprintf(stderr,"[PB ERROR] unreadable command=%08X\n",va);pb_reject(unknown);break;}
         if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);break;}
         uint32_t from=va,w=0;
         int resumed=s_pending_count&&va==s_pending_va;
         if(s_pending_count&&!resumed){static unsigned missed;if(missed++<12)fprintf(stderr,"[PB RESUME] expected=%08X got=%08X remaining=%u\n",s_pending_va,va,s_pending_count);}
-        if(!resumed){w=*(const uint32_t*)(mem+va);va+=4;words++; unsigned slot=s_header_count++&63;s_headers[slot].va=from;s_headers[slot].word=w;}
+        if(s_pending_count&&!resumed)get_freeze(va,5);
+        if(!resumed){get_before_read(va,!child&&!return_va);PB_READ_HOOK(va,0);w=*(const uint32_t*)(mem+va);va+=4;words++; unsigned slot=s_header_count++&63;s_headers[slot].va=from;s_headers[slot].word=w;}
         if(!resumed&&((w&3)==1||(w&0xE0000003u)==0x20000000u)) {
             uint32_t physical=(w&3)==1?w&0xFFFFFFFCu:w&0x1FFFFFFCu;
             uint32_t target=XBOX_CONTIG_BASE|(physical&0x0FFFFFFFu);(*jumps)++;
             unsigned slot=s_branch_count++&31;s_branches[slot].from=from;s_branches[slot].word=w;s_branches[slot].target=target;
             if(target>=s_ring_low&&target<=s_ring_high) {
                 if(target<root_start||target>root_end)break; /* wrap/future segment */
+                if(!return_va) {
+                    if((!child&&target<from)||(child&&target<s_get_last)) {
+                        ++g_nv2a_get_stats.backward_jumps;get_freeze(from,3);
+                    }
+                    else get_progress(target,1);
+                }
                 va=target;end_va=root_end;child=0;
-            } else {va=target;end_va=va+0x400000u;child=1;}
+            } else {if(!child&&!return_va)get_progress(va,1);va=target;end_va=va+0x400000u;child=1;}
             continue;
         }
         if(!resumed&&(w&0xFFFF0003u)==0x00020000u) {
@@ -249,7 +331,10 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
         }
         if(!resumed&&(w&3)==2) {
             if(return_va){pb_capture_first(root_start,root_end,from,w);pb_reject(unknown);break;}
-            return_va=va;va=XBOX_CONTIG_BASE|((w&0xFFFFFFFCu)&0x0FFFFFFFu);end_va=va+0x400000u;child=1;s_tot_calls++;
+            uint32_t target=XBOX_CONTIG_BASE|((w&0xFFFFFFFCu)&0x0FFFFFFFu);
+            if(get_in_ring(target)){++g_nv2a_get_stats.ring_calls;get_freeze(from,4);}
+            get_progress(va,1);
+            return_va=va;va=target;end_va=va+0x400000u;child=1;s_tot_calls++;
             if(getenv("RECOMP_PB_CALL_TRACE"))fprintf(stderr,"[PB CALL] from=%08X target=%08X return=%08X last_nop=%08X flags=%u\n",from,va,return_va,s_last_nop,s_last_nop&31);
             continue;
         }
@@ -261,10 +346,14 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
         for(i=0;i<count&&va<end_va;i++) {
             if(!pb_readable(va,4)){pb_reject(unknown);return words;}
             if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+va,4)){pb_reject(unknown);return words;}
+            get_before_read(va,!child&&!return_va);PB_READ_HOOK(va,1);
             uint32_t m=noninc?method:method+i*4,parameter=*(const uint32_t*)(mem+va);va+=4;words++;
             if(subch==0 && ((m==0x100&&parameter)||m==0x1D70))
                 nv2a_order_trace(NV_ORDER_COMMAND,va-4,m,parameter,0);
+            if(s_get_monitor&&subch==0&&(m==0x100||m==0x110||m==0x1D90))
+                nv2a_order_trace(NV_ORDER_FETCH,va-4,m,parameter,from);
             note(subch,m);if(s_exec_enabled)nv2a_pb_exec_method(subch,m,parameter);
+            if(s_get_enabled&&xbox_Nv2aFenceBatchFailed())get_freeze(va-4,2);
             if(subch==0&&m==0x100)s_last_nop=parameter;
             /* SDK 0x0039C333 emits a NOP marker, a linked-list word, then a
              * four-word CPU record. Its last word is the next GPU command.
@@ -272,7 +361,12 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
             if(subch==0&&m==0x100&&s_nop_shift&&((parameter&31)==s_nop_action)) {
                 uint32_t record=XBOX_CONTIG_BASE|(parameter>>s_nop_shift);
                 if(record!=va+4||!pb_readable(record,s_nop_next+4)){fprintf(stderr,"[PB ERROR] bad NOP record marker=%08X pc=%08X\n",parameter,va);pb_reject(unknown);return words;}
+                /* The marker is consumed, but its linked-list word and CPU
+                 * record are not. Keep the fetch bound even when the marker
+                 * straddles a publication stride, without entering the record. */
+                if(!child&&!return_va)get_progress(va,1);
                 if(s_acquire_inputs&&!nv2a_hw_acquire_input(mem+record,s_nop_next+4)){pb_reject(unknown);return words;}
+                get_before_read(record+s_nop_next,0);PB_READ_HOOK(record+s_nop_next,2);
                 uint32_t next=*(const uint32_t*)(mem+record+s_nop_next);
                 if((next&3)||next<record+s_nop_next+4||next>end_va){fprintf(stderr,"[PB ERROR] bad NOP continuation=%08X record=%08X\n",next,record);pb_reject(unknown);return words;}
                 va=next;

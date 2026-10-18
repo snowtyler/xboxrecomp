@@ -199,6 +199,7 @@ int xbox_Nv2aReleaseSemaphore(uint32_t context, uint32_t offset, uint32_t value)
 void xbox_Nv2aFenceBatchBegin(void);
 int xbox_Nv2aFenceBatchActive(void);
 int xbox_Nv2aFenceBatchHasRelease(void);
+int xbox_Nv2aFenceBatchFailed(void);
 void xbox_Nv2aFenceBatchFail(void);
 void xbox_Nv2aFenceBatchEnd(int commit);
 void xbox_Nv2aBindRing(uint32_t device_ptr_va,uint32_t low_offset,uint32_t high_offset);

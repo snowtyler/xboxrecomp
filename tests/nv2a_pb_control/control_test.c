@@ -32,6 +32,7 @@ void nv2a_pb_exec_method(uint32_t channel,uint32_t method,uint32_t value)
 void nv2a_pb_exec_report(void){}
 void xbox_Nv2aFenceBatchBegin(void){assert(!active);active=1;pending=failed=0;}
 int xbox_Nv2aFenceBatchHasRelease(void){return pending&&!failed;}
+int xbox_Nv2aFenceBatchFailed(void){return failed;}
 void xbox_Nv2aFenceBatchFail(void){failed=1;}
 int xbox_Nv2aFenceBatchFlush(void){if(failed)return 0;if(pending)++releases;pending=0;return 1;}
 void xbox_Nv2aFenceBatchEnd(int commit){if(commit&&!failed&&pending)++releases;active=0;}

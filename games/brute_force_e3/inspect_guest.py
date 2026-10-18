@@ -77,18 +77,26 @@ t=None
 try:
     for name in ['g_memory_offset','g_state','g_nv2a_notify_pending','g_nv2a_memory',
                  'g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed','g_pending_fences',
-                 's_irq_line','g_irql_raised_count','_tls_index','g_eax','g_ecx','g_edx','g_esp','g_ebp','g_esi','g_edi']:
+                 's_irq_line','g_irql_raised_count','g_nv2a_get_stats','g_pfb_page',
+                 '_tls_index','g_eax','g_ecx','g_edx','g_esp','g_ebp','g_esi','g_edi']:
         try:result['symbols'][name]=sym(name)
         except OSError as e:result['symbols'][name]={'error':str(e)}
     offset=uint(result['symbols']['g_memory_offset']['address'],8)
     dev=uint(offset+0x003AB378);result['guest']['device']=hex(dev)
     if dev:
-        result['guest']['device_fields']={hex(x):hex(uint(offset+dev+x)) for x in [0,4,0x24,0x28,0x2c,0x30,0x17c0,0x196c,0x1970]}
+        result['guest']['device_fields']={hex(x):hex(uint(offset+dev+x)) for x in
+            [0,4,0x24,0x28,0x2c,0x30,0x3c,0x40,0x4f8,0x15ac,0x15b0,0x17c0,0x17c8,0x196c,0x1970,0x1fe0]}
         fence=uint(offset+dev+0x30)
         if fence:result['guest']['fence']=hex(uint(offset+fence))
         result['guest']['fence_records']=[{'serial':hex(uint(offset+dev+0x4c+i*12)),
             'command':hex(uint(offset+dev+0x50+i*12)),
             'position':hex(uint(offset+dev+0x54+i*12))} for i in range(64)]
+        result['guest']['reserved_words']=[]
+        for record in result['guest']['fence_records']:
+            command=int(record['command'],16)
+            if 0x80000000<=command<=0x83ffffe8:
+                result['guest']['reserved_words'].append({'serial':record['serial'],
+                    'command':record['command'],'words':[hex(uint(offset+command+i*4)) for i in range(6)]})
     t=k.OpenThread(0x40,False,a.tid)
     basic=c.create_string_buffer(48);n.NtQueryInformationThread.argtypes=[w.HANDLE,c.c_int,c.c_void_p,w.ULONG,c.c_void_p]
     if not t or n.NtQueryInformationThread(t,0,basic,48,None)!=0:raise RuntimeError('Thread info unavailable')
@@ -102,7 +110,17 @@ try:
         base=uint(variable_address('g_nv2a_memory'),8)
         gpu['registers']={name:hex(uint(base+at)) for name,at in {
             'DMA_PUT':0x800040,'DMA_GET':0x800044,'PMC_INTR':0x100,'PGRAPH_INTR':0x400100,
-            'PGRAPH_NSOURCE':0x400108,'PGRAPH_TRAPPED_ADDR':0x400704,'PGRAPH_TRAPPED_DATA':0x400708}.items()}
+            'PGRAPH_NSOURCE':0x400108,'PGRAPH_TRAPPED_ADDR':0x400704,'PGRAPH_TRAPPED_DATA':0x400708,
+            'PFIFO_DMA_PUT':0x3240,'PFIFO_DMA_GET':0x3244,'PFIFO_REF':0x3248,'PFIFO_SUBROUTINE':0x324c}.items()}
+        pfb=result['symbols']['g_pfb_page']
+        gpu['pfb_trap_active']=bool(uint(pfb['address'],8)) if 'address' in pfb else None
+        gpu['pfb_trap_matches_guest']=(bool(dev) and gpu['pfb_trap_active'] and
+            uint(pfb['address'],8)==offset+uint(offset+dev+0x17c8)+0x100000) if 'address' in pfb else None
+        stats=result['symbols']['g_nv2a_get_stats']
+        if 'address' in stats:
+            offsets=members(stats['base'],stats['type'])
+            gpu['get_monitor']={key:uint(stats['address']+at,4 if key in ('max_lag','last_read') else 8)
+                                for key,at in offsets.items()}
         gpu['notify_pending']=uint(variable_address('g_nv2a_notify_pending'))
         gpu['fence_batch']={name:uint(variable_address(name)) for name in
             ['g_fence_batch_depth','g_pending_fence_count','g_fence_batch_failed']}
