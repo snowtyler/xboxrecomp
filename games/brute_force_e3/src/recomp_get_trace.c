@@ -10,10 +10,40 @@
 static RECOMP_TLS uint32_t s_wait_serial;
 static RECOMP_TLS uint64_t s_begin,s_poll;
 static RECOMP_TLS uint32_t s_path;
+/* Optional cumulative per-thread observations. QPC is wall time; thread times
+ * exclude descheduling. No per-iteration hook is added to the busy loop. */
+typedef struct WaitProfile {
+    uint64_t begin_cpu, stage_cpu, stage_qpc, last_report;
+    uint64_t completed, poll_count, event_count, poll_qpc, event_qpc;
+    uint64_t poll_cpu, event_cpu, cpu_errors;
+    int active, stage, cpu_valid;
+} WaitProfile;
+static RECOMP_TLS WaitProfile s_profile;
+static int profile_enabled(void)
+{
+    static int value=-1;
+    if(value<0)value=nv2a_get_flag("RECOMP_BRUTE_FORCE_WAIT_PROFILE",0);
+    return value;
+}
+static int thread_cpu(uint64_t *result)
+{
+    FILETIME created,exited,kernel,user;
+    if(!GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user))return 0;
+    *result=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
+            (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
+    return 1;
+}
+static void profile_stage(int stage)
+{
+    if(!profile_enabled()||!s_profile.active||s_profile.stage)return;
+    LARGE_INTEGER q;QueryPerformanceCounter(&q);
+    s_profile.stage=stage;s_profile.stage_qpc=(uint64_t)q.QuadPart;
+    s_profile.cpu_valid=thread_cpu(&s_profile.stage_cpu);
+}
 static int enabled(void)
 {
     static int value=-1;
-    if(value<0)value=nv2a_get_monitor_enabled();
+    if(value<0)value=nv2a_get_monitor_enabled()||profile_enabled();
     return value;
 }
 void brute_force_get_wait_begin(uint32_t serial,uint32_t flags,uint32_t stack)
@@ -21,6 +51,10 @@ void brute_force_get_wait_begin(uint32_t serial,uint32_t flags,uint32_t stack)
     if(!enabled())return;
     s_wait_serial=serial;
     LARGE_INTEGER q;QueryPerformanceCounter(&q);s_begin=(uint64_t)q.QuadPart;s_poll=0;s_path=0;
+    if(profile_enabled()) {
+        s_profile.active=1;s_profile.stage=0;
+        if(!s_profile.last_report)s_profile.last_report=s_begin;
+    }
     nv2a_order_trace(NV_ORDER_WAIT_BEGIN,serial,flags,stack,0);
 }
 void brute_force_get_wait_check(uint32_t record,uint32_t device,uint32_t distance,uint32_t d2)
@@ -36,8 +70,10 @@ void brute_force_get_wait_poll(void)
 {
     if(!enabled())return;
     LARGE_INTEGER q;QueryPerformanceCounter(&q);s_poll=(uint64_t)q.QuadPart;s_path=1;
+    profile_stage(1);
     nv2a_order_trace(NV_ORDER_WAIT_POLL,s_wait_serial,0,0,0);
 }
+void brute_force_get_wait_event(void) {profile_stage(2);}
 void brute_force_get_wait_end(void)
 {
     if(!enabled())return;
@@ -46,6 +82,29 @@ void brute_force_get_wait_end(void)
     uint64_t spin=s_poll?((uint64_t)q.QuadPart-s_poll)*1000000u/(uint64_t)f.QuadPart:0;
     nv2a_order_trace(NV_ORDER_WAIT_END,s_wait_serial,s_path,
         (uint32_t)(us>0xffffffffu?0xffffffffu:us),(uint32_t)(spin>0xffffffffu?0xffffffffu:spin));
+    if(profile_enabled()&&s_profile.active) {
+        uint64_t cpu=0;int valid=thread_cpu(&cpu);
+        s_profile.completed++;
+        if(s_profile.stage) {
+            uint64_t wall=(uint64_t)q.QuadPart-s_profile.stage_qpc;
+            if(s_profile.stage==1){s_profile.poll_count++;s_profile.poll_qpc+=wall;}
+            else {s_profile.event_count++;s_profile.event_qpc+=wall;}
+            if(valid&&s_profile.cpu_valid&&cpu>=s_profile.stage_cpu) {
+                if(s_profile.stage==1)s_profile.poll_cpu+=cpu-s_profile.stage_cpu;
+                else s_profile.event_cpu+=cpu-s_profile.stage_cpu;
+            } else s_profile.cpu_errors++;
+        }
+        s_profile.active=0;
+        if((uint64_t)q.QuadPart-s_profile.last_report>=(uint64_t)f.QuadPart*2) {
+            fprintf(stderr,"[SDK WAIT PROFILE] {\"version\":1,\"tid\":%lu,\"qpc_ms\":%.3f,\"completed\":%llu,\"poll_count\":%llu,\"event_count\":%llu,\"poll_wall_ms\":%.3f,\"event_wall_ms\":%.3f,\"poll_cpu_ms\":%.3f,\"event_cpu_ms\":%.3f,\"cpu_errors\":%llu}\n",
+                GetCurrentThreadId(),q.QuadPart*1000.0/f.QuadPart,
+                (unsigned long long)s_profile.completed,(unsigned long long)s_profile.poll_count,
+                (unsigned long long)s_profile.event_count,s_profile.poll_qpc*1000.0/f.QuadPart,
+                s_profile.event_qpc*1000.0/f.QuadPart,s_profile.poll_cpu/10000.0,
+                s_profile.event_cpu/10000.0,(unsigned long long)s_profile.cpu_errors);
+            s_profile.last_report=(uint64_t)q.QuadPart;
+        }
+    }
 }
 
 /* These checkpoints read the actual guest request, not a menu/capture

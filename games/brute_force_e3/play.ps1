@@ -73,6 +73,7 @@ $settingsTask = @{
     RECOMP_NV2A_ORDER_TRACE = $null
     RECOMP_NV2A_GET_PROGRESS = $(if ($DisableGetProgress -or [Environment]::GetEnvironmentVariable('RECOMP_NV2A_GET_PROGRESS') -ceq '0') { '0' } else { $null })
     RECOMP_NV2A_GET_MONITOR = $null
+    RECOMP_BRUTE_FORCE_WAIT_PROFILE = $null
     RECOMP_BRUTE_FORCE_ROUTE_STATE = $null
     RECOMP_EVENT_TRACE = $null
     RECOMP_PEEK = $null

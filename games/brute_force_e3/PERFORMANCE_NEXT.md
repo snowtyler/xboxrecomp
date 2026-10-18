@@ -15,18 +15,40 @@ default/rollback probes and the qualification boundary.
 
 Next independent work:
 
-1. Complete five coalesced short pairs on the integrated build, with GET on.
-2. Compare rendered gameplay in barrier and coalesced modes using the same
+The first combat profile is complete; see `COMBAT_PROFILE_158.md`. Its valid
+500–530 s gameplay window attributes 38.38 of 66.09 ms/flip to release sync,
+with no poll waits. The firing-time CPU sample is mostly event-waiting on the
+main thread. Later close-rock views are excluded from representative combat.
+The shorter future camera route still needs validation before matched captures.
+WAV/device evidence and a separate fed clock probe support actual starvation
+in this diagnostic run; pacing/production cause and clean-run overhead remain
+to be isolated. Coalesced short pairs and scene comparison are next.
+
+1. Profile combat first on the qualified barrier baseline. Attribute main-thread
+   poll-path wall and CPU time separately from event waits, then compare with
+   executor release synchronization. Poll wall time includes descheduling;
+   guest wait and executor sync intervals overlap and cannot be added together.
+2. Complete five coalesced short pairs on the integrated build, with GET on.
+   Keep the direct post-arm counter enabled in both arms, including GET-off
+   controls. A nonzero control is diagnostic evidence, not a required race in
+   every run. Compare rendered gameplay in barrier and coalesced modes using the same
    guest-flip input/capture schedule. Check scene state too: flip alignment
    alone cannot control wall-clock simulation or RNG. Movie artifacts do not
    answer this question. Audit input acquisition if artifacts occur only with
    coalescing; keep shared rendering bugs separate.
-3. Record a combat frame/pacing trace and CPU profile on the barrier baseline
-   to remeasure release synchronization cost before further renderer work.
-4. Validate the underrun counter with a known-duration producer stall, then
+3. Validate the underrun counter with a known-duration producer stall, then
    collect WAV and raw QPC/device timing during gameplay. Compare SamplesPlayed
    over long windows and estimate drift from fed intervals before calling
    sample deficits playback gaps.
+
+The candidate156 prepare-to-enqueue replay gap is 229.077974 seconds. The
+original `Campaign_Intro.bik`, `Tex_Intro_Final.bik` and `MB01.bik` have a
+combined encoded duration of 228.995662 seconds, only 82 ms shorter. All three
+are opened again during replay. This supports the ordinary intro explanation;
+an unmodified-emulator/original-hardware timing comparison is still unavailable.
+The known DirectSound movie stall remains separate, rather than inferred from
+this gap alone. Raw hashes/durations are in
+`analysis/replay-intro-duration-evidence.json`.
 
 These gates do not require serial planning, but the single-host probe lock
 protects shared GPU/input/save state. Performance measurements must not overlap

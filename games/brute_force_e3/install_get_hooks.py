@@ -18,6 +18,8 @@ HOOKS = {
         "brute_force_get_wait_check(edi,esi,eax,edx);}"),
     "loc_0039ECDD: ;": (
         "    {extern void brute_force_get_wait_poll(void);brute_force_get_wait_poll();}"),
+    "loc_0039ED20: ;": (
+        "    {extern void brute_force_get_wait_event(void);brute_force_get_wait_event();}"),
     "loc_0039ED0E: ;": (
         "    {extern void brute_force_get_wait_end(void);brute_force_get_wait_end();}"),
     "loc_0039ED2F: ;": (

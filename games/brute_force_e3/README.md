@@ -7,6 +7,10 @@ results and rollback. Coalescing and IRQ gating remain off. Current gameplay
 performance and audio quality still need measurement. Assets and generated/build
 outputs must be supplied/regenerated locally as described below.
 
+The first combat profile keeps release synchronization as the main performance
+lead; see [combat and audio observations](COMBAT_PROFILE_158.md) for the measured
+wait split, replay timing check and remaining qualification limits.
+
 This project targets the extracted prototype supplied at
 `D:\Downloads\Brute Force E3 Prototype`. The retail build must use a separate
 project: its function addresses and generated code will differ.
@@ -98,7 +102,7 @@ prototype is byte-identical to candidate157 and passed owned-window launch/close
 verification. See `GET_DEFAULT_PROMOTION.md` for the exact qualification chain.
 
 This is an experimental playable build. Current gameplay performance has not
-been qualified; older builds measured roughly 8–28 FPS in selected scenes.
+been qualified; older builds measured roughly 8â€“28 FPS in selected scenes.
 Bink movies have decoding artifacts, and the
 audio DSP uses passthrough mixing. The full campaign, multiplayer and a
 physical controller have not been exhaustively tested. The test used scripted

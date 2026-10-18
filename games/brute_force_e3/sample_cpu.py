@@ -60,7 +60,9 @@ counts = collections.Counter()
 thread_counts = {thread_id: collections.Counter() for _, thread_id, _ in threads}
 stack_words = {}
 process = k.OpenProcess(0x410, False, a.pid)
-deadline = time.monotonic() + a.seconds
+sample_started = time.monotonic()
+deadline = sample_started + a.seconds
+cpu_ends = {}
 try:
     while time.monotonic() < deadline:
         c.c_uint32.from_address(aligned + 48).value = 0x100003
@@ -86,7 +88,11 @@ try:
                     k.ResumeThread(thread_handle)
         time.sleep(0.007)
 finally:
-    for _, _, h in threads:
+    sample_ended = time.monotonic()
+    for _, thread_id, h in threads:
+        times = [w.FILETIME() for _ in range(4)]
+        if k.GetThreadTimes(h, *map(c.byref, times)):
+            cpu_ends[thread_id] = sum((t.dwHighDateTime << 32) | t.dwLowDateTime for t in times[2:])
         k.CloseHandle(h)
 d.SymInitializeW.argtypes = [w.HANDLE, w.LPCWSTR, w.BOOL]
 d.SymFromAddr.argtypes = [w.HANDLE, c.c_uint64, c.POINTER(c.c_uint64), c.c_void_p]
@@ -133,12 +139,18 @@ try:
                     if name.startswith(("sub_", "bridge_", "kernel_", "xbox_", "nv2a_")) and name not in candidates:
                         candidates.append(name)
         thread_results.append({"tid": thread_id, "cpu_seconds": cpu / 10000000,
+                               "cpu_seconds_window": ((cpu_ends[thread_id]-cpu)/10000000
+                                                      if thread_id in cpu_ends else None),
                                "symbols": symbols.most_common(20),
                                "stack_symbol_candidates": candidates[:30]})
 finally:
     d.SymCleanup(process)
     k.CloseHandle(process)
 result = {"pid": a.pid, "tid": tid, "samples": sum(counts.values()),
+          "sample_started_monotonic": sample_started,
+          "sample_ended_monotonic": sample_ended,
+          "sample_wall_seconds": sample_ended-sample_started,
+          "limits": "Instruction samples include blocked/descheduled threads and sampler suspension; symbols are not CPU-weighted. cpu_seconds is lifetime at start; cpu_seconds_window is measured over this sample.",
           "symbols": symbolized.most_common(40), "addresses": addresses,
           "threads": thread_results}
 a.output.write_text(json.dumps(result, indent=2))

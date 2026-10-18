@@ -44,6 +44,7 @@ $env:RECOMP_NV2A_IRQ_GATE = if ($IrqGate) { '1' } else { $null }
 $env:RECOMP_NV2A_ORDER_TRACE = if ($OrderTrace) { '1' } else { $null }
 $env:RECOMP_NV2A_GET_PROGRESS = if ($GetProgress) { '1' } else { '0' }
 $env:RECOMP_NV2A_GET_MONITOR = if ($GetMonitor) { '1' } else { $null }
+$env:RECOMP_BRUTE_FORCE_WAIT_PROFILE = $null
 $env:RECOMP_EVENT_TRACE = if ($OrderTrace) { '0x003AAC9C' } else { $null }
 $env:RECOMP_AUDIO_TRACE = '1'
 $env:RECOMP_HW_PRESENT = if ($GpuPresent) { '1' } else { $null }

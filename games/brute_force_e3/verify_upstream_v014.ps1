@@ -10,10 +10,14 @@ param(
     [switch]$Replay,
     [switch]$AudioEvidence,
     [switch]$GuestStateEvidence,
+    [switch]$CombatProfile,
     [string]$FlipScript,
     [string]$CaptureFlips
 )
 $ErrorActionPreference = 'Stop'
+if ($CombatProfile -and ($Seconds -lt 640 -or $Replay -or $FlipScript)) {
+    throw 'CombatProfile needs at least 640 seconds and its own combat route.'
+}
 if ($UseDefaultGetProgress) {
     if (-not $GetMonitor) {throw 'Default-policy qualification requires the GET monitor.'}
     $GetProgress=$true
@@ -52,12 +56,15 @@ $settingsTask = @{
     RECOMP_AUDIO_WAV_SECS=$(if ($AudioEvidence) {[string]$Seconds} else {$null})
     RECOMP_APU_TRACE=$null
     RECOMP_BRUTE_FORCE_ROUTE_STATE=$(if ($Replay -or $GuestStateEvidence) {'1'} else {$null})
+    RECOMP_BRUTE_FORCE_WAIT_PROFILE=$(if ($CombatProfile) {'1'} else {$null})
     RECOMP_PAD_SCRIPT_EXCLUSIVE=$(if ($FlipScript) {'1'} else {$null})
     RECOMP_FB_DUMP_GUEST_FLIPS=$(if ($CaptureFlips) {$CaptureFlips} else {$null})
     RECOMP_GPU_TIMING=$null; RECOMP_HW_GPU_TRACE=$null
-    RECOMP_HW_COUNTERS=$null; RECOMP_HW_CPU_TIMING=$null
+    RECOMP_HW_COUNTERS=$(if ($CombatProfile) {'1'} else {$null})
+    RECOMP_HW_CPU_TIMING=$(if ($CombatProfile) {'1'} else {$null})
     RECOMP_HW_TEXTURE_HASH=$null; RECOMP_HW_TEXTURE_EPOCH=$null
-    RECOMP_NV2A_PFB_POLL=$null; RECOMP_PERF_WINDOWS=$null
+    RECOMP_NV2A_PFB_POLL=$null
+    RECOMP_PERF_WINDOWS=$(if ($CombatProfile) {'500:530,565:585,600:615,620:635'} else {$null})
     RECOMP_AUDIO_BUF_SAMPLES='512'; RECOMP_AUDIO_BUF_COUNT='4'
     RECOMP_HW_PRESENT=$null; RECOMP_HW_TARGET_POOL=$null
     RECOMP_HW_TARGET_POOL_DISABLE=$null; RECOMP_HW_COLOR_RELOAD=$null
@@ -81,15 +88,23 @@ try {
     if ($Replay) {
         $routeTask += ',620000:start:400,625000:a:400,665000:black:400,700000:lup:6000,735000:rt:3000,780000:rright:3000,930000:x:600,935000:a:600,1040000:y:1500,1240000:y:2000,1270000:lup:4000,1300000:rt:3000'
     }
+    if ($CombatProfile) {
+        # The first profile's three-second turn ended in close rock views.
+        # Shorter future controls still require capture review before comparison.
+        $routeTask=$routeTask.Replace('560000:rright:3000','560000:rright:250')
+        $routeTask += ',605000:lup:2000,620000:rt:4000'
+    }
     $capturesTask = '100:1,160:1'
     if ($Seconds -gt 470) {$capturesTask += ',470:1'}
     if ($Seconds -gt 550) {$capturesTask += ',550:1'}
     if ($Seconds -gt 590) {$capturesTask += ',590:1'}
+    if ($CombatProfile) {$capturesTask += ',610:1,630:1'}
     if ($Replay) {$capturesTask += ',750:1,900:1,940:1,1050:1,1250:1,1320:1,1450:1'}
     if ($FlipScript) {$routeTask=$FlipScript;$capturesTask=''}
     & (Join-Path $PSScriptRoot 'probe_runtime.ps1') -Name $Name -Executable $Executable `
         -Audio -DspDoorbell auto -Seconds $Seconds -Captures $capturesTask `
-        -InspectFrom ($Seconds - 10) -StateInterval $(if ($Replay -or $GuestStateEvidence) {0.25} else {0}) -PadScript $routeTask
+        -InspectFrom ($Seconds - 10) -StateInterval $(if ($Replay -or $GuestStateEvidence) {0.25} else {0}) -PadScript $routeTask `
+        -Measure:$CombatProfile -SampleFrom $(if ($CombatProfile) {540} else {-1}) -SampleFor 20
     if ($LASTEXITCODE -ne 0) {throw 'Upstream integration probe runner failed.'}
     if ($GetMonitor) {
         & python (Join-Path $PSScriptRoot 'analyze_get_progress.py') (Join-Path $PSScriptRoot "analysis/$Name") `
@@ -102,6 +117,11 @@ try {
         & python (Join-Path $PSScriptRoot 'validate_guest_route.py') (Join-Path $PSScriptRoot "analysis/$Name") `
             --output (Join-Path $PSScriptRoot "analysis/$Name-guest-route.json")
         if ($LASTEXITCODE -ne 0) {throw 'Guest death/replay transitions were not proven.'}
+    }
+    if ($CombatProfile) {
+        & python (Join-Path $PSScriptRoot 'analyze_combat_profile.py') (Join-Path $PSScriptRoot "analysis/$Name") `
+            --output (Join-Path $PSScriptRoot "analysis/$Name-combat.json")
+        if ($LASTEXITCODE -ne 0) {throw 'Combat profile observations are incomplete.'}
     }
     if ($FlipScript) {
         & python (Join-Path $PSScriptRoot 'validate_flip_route.py') (Join-Path $PSScriptRoot "analysis/$Name") `
