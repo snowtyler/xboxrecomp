@@ -67,6 +67,26 @@ static int       g_xa2_dry;
 static ULONGLONG g_xa2_underrun_logged;
 static int                     g_xa2_initialized = 0;
 static int                     g_xa2_frames_written = 0;
+/* Optional raw device observations. Keep these independent of the inferred
+ * starvation reports: an empty queue alone does not establish a gap length. */
+static int g_xa2_device_trace;
+static uint64_t g_xa2_submitted_samples;
+static LONGLONG g_xa2_report_qpc, g_xa2_qpc_hz;
+
+static void xa2_device_report(const XAUDIO2_VOICE_STATE *state)
+{
+    LARGE_INTEGER now;
+    if (!g_xa2_device_trace || !g_xa2_qpc_hz) return;
+    QueryPerformanceCounter(&now);
+    if (now.QuadPart - g_xa2_report_qpc < g_xa2_qpc_hz) return;
+    g_xa2_report_qpc = now.QuadPart;
+    fprintf(stderr, "[XA2 DEVICE] qpc=%lld qpc_hz=%lld played=%llu queued=%u"
+            " submitted=%llu staged=%d underruns=%u\n",
+            (long long)now.QuadPart, (long long)g_xa2_qpc_hz,
+            (unsigned long long)state->SamplesPlayed, state->BuffersQueued,
+            (unsigned long long)g_xa2_submitted_samples, g_xa2_fill,
+            g_xa2_underruns);
+}
 
 int xa2_init(void)
 {
@@ -133,6 +153,16 @@ int xa2_init(void)
     g_xa2_dry = 0;
     g_xa2_initialized = 1;
     g_xa2_frames_written = 0;
+    g_xa2_underruns = 0;
+    g_xa2_underrun_logged = 0;
+    g_xa2_submitted_samples = 0;
+    g_xa2_device_trace = getenv("RECOMP_AUDIO_DEVICE_TRACE") != NULL;
+    {
+        LARGE_INTEGER hz, now;
+        g_xa2_qpc_hz = QueryPerformanceFrequency(&hz) ? hz.QuadPart : 0;
+        QueryPerformanceCounter(&now);
+        g_xa2_report_qpc = now.QuadPart;
+    }
 
     fprintf(stderr, "[XA2] XAudio2 initialized (%d Hz stereo 16-bit, %d x %d-sample buffers, %.1f ms queued max)\n",
             XA2_SAMPLE_RATE, XA2_NUM_BUFS, XA2_BUF_SAMPLES,
@@ -213,6 +243,7 @@ int xa2_submit_samples(const int16_t *samples, int num_samples)
 
         g_xa2_next_buf = (idx + 1) % XA2_RING;
         g_xa2_frames_written++;
+        g_xa2_submitted_samples += XA2_BUF_SAMPLES;
     }
     return ok;
 }
@@ -238,7 +269,7 @@ int xa2_queued_samples(void)
 
     if (!g_xa2_initialized || !g_xa2_source) return 0;
     IXAudio2SourceVoice_GetState(g_xa2_source, &state,
-                                 XAUDIO2_VOICE_NOSAMPLESPLAYED);
+                                 g_xa2_device_trace ? 0 : XAUDIO2_VOICE_NOSAMPLESPLAYED);
     if (state.BuffersQueued == 0 && g_xa2_frames_written > 0) {
         if (!g_xa2_dry) {
             ULONGLONG now = GetTickCount64();
@@ -252,6 +283,7 @@ int xa2_queued_samples(void)
     } else {
         g_xa2_dry = 0;
     }
+    xa2_device_report(&state);
     return (int)state.BuffersQueued * XA2_BUF_SAMPLES + g_xa2_fill;
 }
 

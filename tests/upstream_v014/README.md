@@ -16,3 +16,12 @@ Run `tests/apu_monitor`, `tests/apu_wav`, `tests/nv2a_gpu`,
 WAV output, rendering, late-patch races and completion ordering. Game probes
 use `games/brute_force_e3/verify_upstream_v014.ps1`; they are separate from
 fixture success and do not promote an executable.
+
+The XAudio2 fixture advances a virtual 48 kHz device through a known 100 ms
+producer stall after the queue drains. Repeated polls must count one dry
+spell; elapsed QPC time minus consumed sample time must be exactly 100 ms.
+An instantaneous empty/refill case also counts once but has zero missing
+playback time. Thus the underrun count alone cannot establish audible gaps.
+The fixture checks raw `RECOMP_AUDIO_DEVICE_TRACE` report fields and counter
+reset on reinitialization. These are deterministic device-model checks,
+not an acoustic measurement of a physical output device.

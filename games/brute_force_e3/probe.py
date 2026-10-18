@@ -95,6 +95,8 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
     config_keys = sorted(set(config_keys) | {key for key in env if key.startswith(('RECOMP_', 'BRUTE_FORCE_E3_'))})
     (p / f"analysis/{args.name}-process.json").write_text(json.dumps({"pid": proc.pid,
         "executable": args.exe, "configuration": {key: env.get(key) for key in config_keys},
+        "launch_monotonic_seconds": start,
+        "monotonic_clock": time.get_clock_info("monotonic").implementation,
         "capture_from": args.capture_from, "capture_for": args.capture_for,
         "capture_windows": capture_windows}, indent=2))
     if env.get('RECOMP_NV2A_ORDER_TRACE'):

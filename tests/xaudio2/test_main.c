@@ -24,6 +24,9 @@ static const BYTE *queued[8];
 static BYTE snapshots[8][4096 * 4];
 static UINT32 queued_bytes[8], queue_count;
 static UINT32 max_queue = 3;   /* the buffer count the backend was given */
+static LONGLONG fake_qpc;
+static UINT64 fake_played;
+static UINT32 fake_partial;
 
 #define CHECK(test) do { if (!(test)) { \
     fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); failures++; \
@@ -83,7 +86,34 @@ static void fake_state(XAUDIO2_VOICE_STATE *state)
 {
     memset(state, 0, sizeof(*state));
     state->BuffersQueued = queue_count;
+    state->SamplesPlayed = fake_played;
 }
+
+/* A 48 MHz clock gives exactly 1000 QPC ticks per 48 kHz sample. Consume
+ * real submitted buffers at the device rate; once empty, time still runs. */
+static void advance_device(UINT32 samples)
+{
+    fake_qpc += (LONGLONG)samples * 1000;
+    while (samples && queue_count) {
+        UINT32 remaining = queued_bytes[0] / 4 - fake_partial;
+        UINT32 n = samples < remaining ? samples : remaining;
+        samples -= n;
+        fake_played += n;
+        fake_partial += n;
+        if (n == remaining) {
+            for (UINT32 i = 0; i + 1 < queue_count; i++) {
+                queued[i] = queued[i + 1];
+                queued_bytes[i] = queued_bytes[i + 1];
+                memcpy(snapshots[i], snapshots[i + 1], queued_bytes[i]);
+            }
+            queue_count--;
+            fake_partial = 0;
+        }
+    }
+}
+
+static BOOL fake_counter(LARGE_INTEGER *v) { v->QuadPart = fake_qpc; return TRUE; }
+static BOOL fake_frequency(LARGE_INTEGER *v) { v->QuadPart = 48000000; return TRUE; }
 
 static HRESULT fake_submit(const XAUDIO2_BUFFER *buffer)
 {
@@ -118,6 +148,9 @@ static HRESULT fake_submit(const XAUDIO2_BUFFER *buffer)
 #define IXAudio2SourceVoice_GetState(source, state, ...) fake_state(state)
 #undef IXAudio2SourceVoice_SubmitSourceBuffer
 #define IXAudio2SourceVoice_SubmitSourceBuffer(source, buffer, ...) fake_submit(buffer)
+#define QueryPerformanceCounter(v) fake_counter(v)
+#define QueryPerformanceFrequency(v) fake_frequency(v)
+#define GetTickCount64() ((ULONGLONG)(fake_qpc / 48000))
 #include "../../src/apu/apu_xaudio2.c"
 
 /* xa2_init reads the buffer variables on each call. */
@@ -138,6 +171,7 @@ static void reset(void)
     g_xa2_dry = 0;
     com_refs = releases = master_destroys = source_destroys = 0;
     queue_count = 0;
+    fake_qpc = 0; fake_played = 0; fake_partial = 0;
     volume_result = S_OK; volume_calls = 0;
     com_result = create_result = master_result = source_result = S_OK;
     start_result = submit_result = S_OK;
@@ -395,6 +429,42 @@ int main(void)
     put_env("RECOMP_AUDIO_BUF_SAMPLES=512");
     put_env("RECOMP_AUDIO_BUF_COUNT=4");
     max_queue = 4;
+    /* A known 100 ms producer stall AFTER the submitted buffer drains.
+     * Poll throughout: one dry spell, exactly 4800 missing device frames.
+     * Also prove the count alone can rise at an instantaneous refill with
+     * no lost playback time. The raw trace must retain both observations. */
+    {
+        UINT64 played0, played1;
+        LONGLONG t0;
+        reset(); _putenv_s("RECOMP_AUDIO_DEVICE_TRACE", "1");
+        CHECK(xa2_init() == 1);
+        CHECK(xa2_submit_samples(&samples[0][0], 512) == 1);
+        t0 = fake_qpc; played0 = xa2_samples_played();
+        advance_device(512);
+        xa2_queued_samples();
+        CHECK(xa2_underruns() == 1);
+        for (int i = 0; i < 100; i++) {
+            advance_device(48); /* one millisecond without a producer */
+            xa2_queued_samples();
+        }
+        played1 = xa2_samples_played();
+        CHECK(xa2_underruns() == 1);
+        CHECK((fake_qpc - t0) / 1000 - (LONGLONG)(played1 - played0) == 4800);
+        CHECK(xa2_submit_samples(&samples[0][0], 512) == 1);
+        CHECK(xa2_queued_samples() == 512);
+        t0 = fake_qpc; played0 = xa2_samples_played();
+        advance_device(512);
+        xa2_queued_samples();  /* instantaneous queue-empty observation */
+        CHECK(xa2_underruns() == 2);
+        CHECK(xa2_submit_samples(&samples[0][0], 512) == 1);
+        CHECK((fake_qpc - t0) / 1000 - (LONGLONG)(xa2_samples_played() - played0) == 0);
+        CHECK(g_xa2_submitted_samples == 1536);
+        CHECK(g_xa2_qpc_hz == 48000000);
+        xa2_shutdown();
+        CHECK(xa2_init() == 1);
+        CHECK(xa2_underruns() == 0 && g_xa2_submitted_samples == 0);
+        xa2_shutdown(); _putenv_s("RECOMP_AUDIO_DEVICE_TRACE", "");
+    }
     reset();_putenv_s("RECOMP_AUDIO_MUTE","1");
     volume_result=E_FAIL;
     CHECK(xa2_init()==0 && !xa2_is_active());
@@ -408,25 +478,34 @@ int main(void)
 
     /* The init line names the sizes (last, since stderr is redirected). */
     {
-        char line[512] = "";
+        char line[2048] = "";
         FILE *f;
         put_env("RECOMP_AUDIO_BUF_SAMPLES=256");
         put_env("RECOMP_AUDIO_BUF_COUNT=5");
         reset();
         max_queue = 5;
+        _putenv_s("RECOMP_AUDIO_DEVICE_TRACE", "1");
         fflush(stderr);
         if (freopen("xa2_init_line.txt", "w", stderr)) {
             xa2_init();
+            CHECK(xa2_submit_samples(&samples[0][0], 256) == 1);
+            advance_device(48000);
+            xa2_queued_samples();
             fflush(stderr);
             xa2_shutdown();
             fclose(stderr);
             f = fopen("xa2_init_line.txt", "r");
-            if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; fclose(f); }
+            if (f) { size_t n = fread(line, 1, sizeof(line) - 1, f); line[n] = 0; fclose(f); }
             if (!strstr(line, "5 x 256-sample buffers")) {
                 printf("FAIL: init line does not name 5 x 256: %s\n", line);
                 failures++;
             }
+            if (!strstr(line, "[XA2 DEVICE] qpc=48000000 qpc_hz=48000000 played=256 queued=0 submitted=256 staged=0 underruns=1")) {
+                printf("FAIL: missing raw device accounting: %s\n", line);
+                failures++;
+            }
         }
+        _putenv_s("RECOMP_AUDIO_DEVICE_TRACE", "");
     }
 
     printf("XAudio2 regression: %d failures\n", failures);

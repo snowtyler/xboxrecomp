@@ -9,6 +9,54 @@ import json
 import re
 from pathlib import Path
 
+def summarize_monitor(prefix: Path):
+    """Long-route monitor checks; does not claim SDK-wait trace coverage."""
+    def side(suffix):
+        return prefix.with_name(prefix.name + suffix)
+    config = json.loads(side("-process.json").read_text())["configuration"]
+    process = json.loads(side(".json").read_text())
+    log = side(".stderr.log").read_text(errors="replace")
+    rows = re.findall(
+        r"\[PB GET\] reads=(\d+) far=(\d+) invalid=(\d+) untrusted=(\d+) max_lag=([0-9A-F]+) "
+        r"publications=(\d+) freezes=(\d+) backward=(\d+) ring_calls=(\d+)", log)
+    keys = ["reads", "far_reads", "invalid_get", "untrusted_reads", "max_lag",
+            "publications", "freezes", "backward_jumps", "ring_calls"]
+    monitors = [dict(zip(keys, [int(v, 16 if i == 4 else 10) for i, v in enumerate(row)])) for row in rows]
+    monitor = monitors[-1] if monitors else {}
+    snapshot = json.loads(side("-guest-inspection.json").read_text())
+    gpu = snapshot.get("gpu", {})
+    errors = []
+    if config.get("RECOMP_NV2A_GET_MONITOR") != "1" or not monitor.get("reads"):
+        errors.append("monitor missing or did not observe ring reads")
+    if config.get("RECOMP_NV2A_GET_PROGRESS") not in (None, "1"):
+        errors.append("ambiguous GET progress flag; remove it or set it to 1")
+    if gpu.get("pfb_trap_active") is not True or gpu.get("pfb_trap_matches_guest") is not True:
+        errors.append("PFB trap not verified active")
+    if any(config.get(k) is not None for k in ("RECOMP_NV2A_IRQ_GATE", "RECOMP_NV2A_PFB_POLL",
+                                  "RECOMP_GPU_TIMING", "RECOMP_HW_GPU_TRACE")):
+        errors.append("IRQ gate, PFB polling or GPU profiling enabled")
+    if process.get("exit_code") != 3 or process.get("stopped") or process.get("timed_out"):
+        errors.append("probe did not reach its normal watchdog exit")
+    for row in monitors:
+        if any(row[k] for k in ("invalid_get", "untrusted_reads", "freezes", "backward_jumps", "ring_calls")):
+            errors.append("monitor reports unsupported or failed execution")
+            break
+    progress = config.get("RECOMP_NV2A_GET_PROGRESS") == "1"
+    if progress and (not monitor.get("publications") or any(row["far_reads"] or row["max_lag"] > 0x3FC for row in monitors)):
+        errors.append("GET progress publication or lag invariant failed")
+    if not progress and not monitor.get("far_reads"):
+        errors.append("control did not expose stale GET")
+    failures = [line for line in log.splitlines() if any(p in line for p in
+                ("[PB ERROR]", "[PB RESUME]", "[HW FENCE] batch failed", "[HW FENCE] rejected",
+                 "[FAULT]", "EXCEPTION_ACCESS_VIOLATION"))]
+    if failures:
+        errors.append("runtime, pushbuffer or fence failure")
+    return dict(name=prefix.name, progress=progress, configuration=config, monitor=monitor,
+                reports=len(monitors), automated_checks_passed=not errors, errors=errors,
+                failure_lines=failures[:20],
+                qualification_status="failed" if errors else "monitor_checks_passed_pending_visual_review",
+                limits="No ordered SDK-wait analysis; gameplay, death and replay require visual review.")
+
 def summarize(prefix: Path):
     def side(suffix):
         return prefix.with_name(prefix.name + suffix)
@@ -89,7 +137,7 @@ def summarize(prefix: Path):
     if any(monitor.get(k) for k in ("invalid_get", "untrusted_reads", "freezes", "backward_jumps", "ring_calls")):
         errors.append("monitor reports unsupported or failed execution")
     progress = bool(config.get("RECOMP_NV2A_GET_PROGRESS"))
-    if progress and (monitor.get("far_reads") or monitor.get("max_lag",0)>=0x400 or already_read or waiting_age > 5):
+    if progress and (monitor.get("far_reads") or monitor.get("max_lag",0)>0x3FC or already_read or waiting_age > 5):
         errors.append("GET progress invariant or graphics wait failed")
     if not progress and not monitor.get("far_reads"):
         errors.append("control did not expose stale GET")
@@ -111,8 +159,10 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("prefix", type=Path)
     p.add_argument("--output", type=Path)
+    p.add_argument("--monitor-only", action="store_true",
+                   help="Long-route monitor checks without an ordered SDK-wait trace")
     args = p.parse_args()
-    result = summarize(args.prefix)
+    result = (summarize_monitor if args.monitor_only else summarize)(args.prefix)
     text = json.dumps(result, indent=2) + "\n"
     if args.output:
         args.output.write_text(text)

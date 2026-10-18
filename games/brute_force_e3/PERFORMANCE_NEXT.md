@@ -6,6 +6,15 @@ frozen; the corrected launcher has not changed the executable.
 
 ### October 18 upstream integration
 
+The follow-up sequence is now specified in `CANDIDATE153_QUALIFICATION.md`:
+repeat short-route pairs on the integrated executable, add a monitored
+barrier-mode GET-off control, then qualify barrier-mode GET-on gameplay,
+death and replay before promoting GET progress. Compare rendered gameplay
+in matched scenes with GET progress on in both barrier/coalesced arms;
+movie artifacts do not settle that question. Audio measurements pair the
+WAV tap with raw QPC/device counters and host starvation accounting, after
+a known-duration producer-stall fixture checks the counter's meaning.
+
 Selected v0.14.0 floating-point/flag, port-I/O, audio and positive-zero vertex-W
 changes are ported on `codex/integrate-v014`; see `UPSTREAM_V014_INTEGRATION.md`.
 Candidate152 reached HUD gameplay in a 600-second normal-audio/barrier run,

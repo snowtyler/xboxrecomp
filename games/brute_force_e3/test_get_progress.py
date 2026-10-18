@@ -1,10 +1,11 @@
 """Checks that qualification rejects blind monitors and missing evidence."""
 import csv
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
-from analyze_get_progress import summarize
+from analyze_get_progress import summarize, summarize_monitor
 from install_get_hooks import HOOKS, install
 
 class QualificationTests(unittest.TestCase):
@@ -12,7 +13,8 @@ class QualificationTests(unittest.TestCase):
         prefix = root / "probe"
         def put(suffix, value):
             prefix.with_name(prefix.name + suffix).write_text(json.dumps(value))
-        put("-process.json", {"configuration": {"RECOMP_NV2A_GET_PROGRESS": "1" if progress else None}})
+        put("-process.json", {"configuration": {"RECOMP_NV2A_GET_PROGRESS": "1" if progress else None,
+                                              "RECOMP_NV2A_GET_MONITOR": "1"}})
         put("-order.json", dict(records=6, discarded=lost, overwritten=0))
         put(".json", dict(exit_code=3, stopped=False, timed_out=False))
         put("-guest-inspection.json", {"gpu": {"pfb_trap_active": pfb,"pfb_trap_matches_guest":pfb}})
@@ -60,6 +62,33 @@ class QualificationTests(unittest.TestCase):
             path.write_text("invalid generated output")
             with self.assertRaises(ValueError):
                 install(path)
+
+    def test_long_route_monitor_checks_do_not_require_order_trace(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            prefix = self.fixture(Path(directory))
+            prefix.with_name(prefix.name + "-order.csv").unlink()
+            prefix.with_name(prefix.name + "-order.json").unlink()
+            self.assertTrue(summarize_monitor(prefix)["automated_checks_passed"])
+            log = prefix.with_name(prefix.name + ".stderr.log")
+            good = log.read_text()
+            for replacement in ("max_lag=3FD", "freezes=1", "backward=1", "ring_calls=1", "publications=0"):
+                key = replacement.split("=")[0]
+                log.write_text(re.sub(rf"{key}=[0-9A-F]+", replacement, good))
+                self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"], replacement)
+            log.write_text(good)
+            self.assertFalse(summarize_monitor(self.fixture(Path(directory), progress=False))["automated_checks_passed"])
+            self.assertTrue(summarize_monitor(self.fixture(Path(directory), progress=False, far=1))["automated_checks_passed"])
+
+    def test_long_route_rejects_empty_presence_flags(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            root = Path(directory)
+            for flag in ("RECOMP_NV2A_IRQ_GATE", "RECOMP_GPU_TIMING", "RECOMP_NV2A_GET_PROGRESS"):
+                prefix = self.fixture(root)
+                path = prefix.with_name(prefix.name + "-process.json")
+                metadata = json.loads(path.read_text())
+                metadata["configuration"][flag] = ""
+                path.write_text(json.dumps(metadata))
+                self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"], flag)
 
 if __name__ == "__main__":
     unittest.main()
