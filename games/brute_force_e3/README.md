@@ -1,11 +1,11 @@
 # Brute Force E3 prototype recompilation
 
-Performance work is currently paused, with a separate unpromoted candidate.
-The measured8.1% improvement used graphics profiling; normal-mode performance
-and final gameplay verification remain unfinished. See [PERFORMANCE.md](PERFORMANCE.md)
-and [the independent-review handoff](review/README.md) for source and evidence.
-The handoff commit is not a verified release. Assets and generated/build outputs
-must be supplied/regenerated locally as described below.
+GET progress is now enabled by default on the integrated v0.14 build, after
+normal-barrier gameplay/death/replay qualification. The named prototype uses
+candidate157; see [GET default promotion](GET_DEFAULT_PROMOTION.md) for the
+results and rollback. Coalescing and IRQ gating remain off. Current gameplay
+performance and audio quality still need measurement. Assets and generated/build
+outputs must be supplied/regenerated locally as described below.
 
 This project targets the extracted prototype supplied at
 `D:\Downloads\Brute Force E3 Prototype`. The retail build must use a separate
@@ -61,7 +61,9 @@ window. It reads the original extracted game folder directly and writes saves
 under this project's `saves/`. Pass `-GameDirectory 'D:\Your\Game'` to select
 another location containing this exact prototype. Pass `-Audio:$false` to
 mute output while keeping the console's audio hardware active. Keep the PDB
-beside the executable for crash diagnostics.
+beside the executable for crash diagnostics. GET progress defaults on; use
+`-DisableGetProgress` or `RECOMP_NV2A_GET_PROGRESS=0` for rollback. The monitor
+is off by default; qualification runners enable it explicitly.
 
 Press Enter at the Start screen, choose Campaign, then Quick Campaign. Wait
 for loading and the introductory sequence. When Basic Controls appears,
@@ -88,15 +90,16 @@ An XInput controller also works. Keyboard input applies while the game window
 has focus. Close the window or press Ctrl+C in the launching terminal to exit.
 Logs are written to `analysis/play-<timestamp>.*.log`.
 
-The named executable passed a 25-minute audio-enabled run on this machine:
+Candidate156 passed a 25-minute audio-enabled normal-barrier run with GET on:
 rendered gameplay, movement, aiming, firing, combat damage, Squad Killed,
-mission restart, and movement/firing after replay. Closing the launcher's
-window ends its game process, and native keyboard/focus checks pass. See
-`analysis/build-verification.json` for artifact hashes and evidence.
+mission restart, and movement/firing after replay. Candidate157 changes the GET
+default and passed separate default-on and explicit-off probes. The named
+prototype is byte-identical to candidate157 and passed owned-window launch/close
+verification. See `GET_DEFAULT_PROMOTION.md` for the exact qualification chain.
 
-This is an experimental playable build. Gameplay performance varies with the
-view (roughly 8-28 FPS in the tested scenes; about 18 FPS at the end of the
-final run on an RTX 4070 Ti). Bink movies have decoding artifacts, and the
+This is an experimental playable build. Current gameplay performance has not
+been qualified; older builds measured roughly 8–28 FPS in selected scenes.
+Bink movies have decoding artifacts, and the
 audio DSP uses passthrough mixing. The full campaign, multiplayer and a
 physical controller have not been exhaustively tested. The test used scripted
 controller input and native keyboard fixtures.

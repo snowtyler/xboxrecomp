@@ -233,6 +233,19 @@ static void protocol_tests(void)
     }
     printf("SDK interleavings: %u read points, atomic/torn, reused/unreused\n",reads+1);
 }
+static void monitor_independence_test(void)
+{
+    _putenv_s("RECOMP_NV2A_GET_MONITOR","0");
+    poison=0;reset(LOW,LOW+0x2100,1);
+    W(LOW)=(2047u<<18)|0x40001808u;
+    scan(LOW,LOW+0x2100,1);
+    assert(g_nv2a_get_stats.reads==0);
+    assert(progress?publications>=7:publications==0);
+    nv2a_pb_get_wait_check(0xF011,LOW,0x2000);
+    uint64_t checks,events,past;nv2a_pb_get_wait_stats(&checks,&events,&past);
+    assert(!checks&&!events&&!past);
+    _putenv_s("RECOMP_NV2A_GET_MONITOR","1");
+}
 static uint64_t structural_tests(int overwrite)
 {
     uint64_t result=0;poison=overwrite;
@@ -329,7 +342,7 @@ int main(int argc,char **argv)
     assert(distance(LOW+0x3000,LOW+0x1000,0,9,4)==0x2005);
     assert(distance(LOW,LOW+4,0,0,0)==0);
     assert(distance(LOW+0x3000,0,LOW+0x1001,0,0)==0x2000);
-    receipt_tests();protocol_tests();
+    receipt_tests();protocol_tests();monitor_independence_test();
     uint64_t hash=structural_tests(0);assert(hash==structural_tests(1));
     /* Publication and executed commands must agree with the other GET arm
      * on identical immutable streams, in either completion configuration. */

@@ -391,7 +391,7 @@ static void pad_script_parse(const char *text)
         st.by_flip = *p == 'f';
         if (st.by_flip) p++;
         st.hold_ms = st.by_flip ? 1 : 150;
-        st.at_ms = strtoul(p, &end, 0);
+        st.at_ms = strtoul(p, &end, st.by_flip ? 10 : 0);
         if (end == p || *end != ':') {
             fprintf(stderr, "  PAD: script entry without <ms>: at \"%.20s\"\n", p);
             break;
@@ -413,7 +413,7 @@ static void pad_script_parse(const char *text)
             b++;
         }
         if (*b == ':')
-            st.hold_ms = strtoul(b + 1, (char **)&b, 0);
+            st.hold_ms = strtoul(b + 1, (char **)&b, st.by_flip ? 10 : 0);
         s_script[s_script_len++] = st;
         p = b;
     }

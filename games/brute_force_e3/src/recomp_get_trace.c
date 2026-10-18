@@ -49,8 +49,8 @@ void brute_force_get_wait_end(void)
 }
 
 /* These checkpoints read the actual guest request, not a menu/capture
- * heuristic. A flags-6 request can open a confirmation before it is accepted;
- * keep acceptance, consumer entry and reload return distinct. */
+ * heuristic. Keep preparation, UI request enqueue, consumer entry and
+ * reload return distinct; a restart movie alone does not prove reload. */
 void brute_force_guest_route(uint32_t pc,uint32_t request,uint32_t iface)
 {
     static int on=-1;

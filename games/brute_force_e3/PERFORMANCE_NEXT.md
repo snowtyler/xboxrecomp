@@ -4,31 +4,36 @@ Planning baseline: October 14, 2026. This is a proposed sequence, not enabled
 behavior or a promised speedup. Candidate149 and its existing evidence remain
 frozen; the corrected launcher has not changed the executable.
 
-### October 18 upstream integration
+### October 18 qualified GET default
 
-`CANDIDATE156_QUALIFICATION.md` supersedes the candidate153 observer details:
-long runs now have a direct post-arm read-past counter, parsed GET rollback,
-guarded guest death/replay evidence and flip-indexed controls/captures. The
-barrier replay gate and coalesced short pairs are independent. Default GET
-promotion waits for the barrier gameplay gate; coalescing remains separate.
+The normal-barrier candidate156 gameplay/death/replay gate passed for 1500.49
+seconds, including guest-state proof and resumed controls. Candidate157 makes
+GET progress the default with explicit `RECOMP_NV2A_GET_PROGRESS=0` rollback.
+The named prototype now uses candidate157; monitoring, coalescing and IRQ gating
+remain off by default. See `GET_DEFAULT_PROMOTION.md` for hashes, gate totals,
+default/rollback probes and the qualification boundary.
 
-The follow-up sequence is now specified in `CANDIDATE153_QUALIFICATION.md`:
-repeat short-route pairs on the integrated executable, add a monitored
-barrier-mode GET-off control, then qualify barrier-mode GET-on gameplay,
-death and replay before promoting GET progress. Compare rendered gameplay
-in matched scenes with GET progress on in both barrier/coalesced arms;
-movie artifacts do not settle that question. Audio measurements pair the
-WAV tap with raw QPC/device counters and host starvation accounting, after
-a known-duration producer-stall fixture checks the counter's meaning.
+Next independent work:
 
-Selected v0.14.0 floating-point/flag, port-I/O, audio and positive-zero vertex-W
-changes are ported on `codex/integrate-v014`; see `UPSTREAM_V014_INTEGRATION.md`.
-Candidate152 reached HUD gameplay in a 600-second normal-audio/barrier run,
-with auto DSP doorbell discovery. Movie artifacts and audio underruns remain;
-this does not establish a performance gain or full replay qualification.
-The named launcher is unchanged. GET progress/coalescing/IRQ gating stayed off
-in this run. The walker and publication policy are preserved, but candidate151's
-runtime GET results must not be treated as qualification of the new guest timing.
+1. Complete five coalesced short pairs on the integrated build, with GET on.
+2. Compare rendered gameplay in barrier and coalesced modes using the same
+   guest-flip input/capture schedule. Check scene state too: flip alignment
+   alone cannot control wall-clock simulation or RNG. Movie artifacts do not
+   answer this question. Audit input acquisition if artifacts occur only with
+   coalescing; keep shared rendering bugs separate.
+3. Record a combat frame/pacing trace and CPU profile on the barrier baseline
+   to remeasure release synchronization cost before further renderer work.
+4. Validate the underrun counter with a known-duration producer stall, then
+   collect WAV and raw QPC/device timing during gameplay. Compare SamplesPlayed
+   over long windows and estimate drift from fed intervals before calling
+   sample deficits playback gaps.
+
+These gates do not require serial planning, but the single-host probe lock
+protects shared GPU/input/save state. Performance measurements must not overlap
+other game runs. No performance or audio-quality improvement is claimed.
+
+The selected v0.14 integration is recorded in `UPSTREAM_V014_INTEGRATION.md`.
+The historical plans and experiments below predate this promotion.
 
 ### October 14 GET implementation update
 

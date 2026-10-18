@@ -1,8 +1,9 @@
 # Direct wait and guest-state qualification
 
 Candidate156 includes the v0.14 integration and the qualification refinements
-below. GET progress still defaults off pending the full barrier gameplay gate;
-the monitor, coalescing and IRQ gate also remain opt-in.
+below. Its full normal-barrier gameplay/death/replay gate passed. Candidate157
+then promoted GET progress to the default; see `GET_DEFAULT_PROMOTION.md`.
+The monitor, coalescing and IRQ gate remain opt-in in the application.
 
 Executable SHA256:
 `cf037b7998b9a98526df1aae1f6d3d72f2309c7a06fdb539ed21a18fc2be3e1c`.
@@ -40,7 +41,8 @@ unresolved. Preserve its artifacts rather than treating an early exit as a pass.
 ## Explicit rollback
 
 Progress and monitor values now parse `0` and `1`; absent, empty or unknown
-values use their declared defaults. The progress default is currently zero.
+values use their declared defaults. Candidate156 used default zero; candidate157
+uses default one after the barrier gate passed.
 `RECOMP_NV2A_GET_PROGRESS=0` remains off even when its default becomes one.
 Control runners set zero explicitly rather than removing the variable.
 
@@ -61,7 +63,7 @@ Replay qualification additionally enables read-only guest checkpoints:
 - `0x00111D43`: the Squad Killed predicate has already passed its mission-state,
   network and object-class checks; observe the remaining failure bit.
 - `0x0008468F`: Replay Mission prepares its descriptor. This alone is insufficient.
-- `0x0010B524`: confirmation accepts/enqueues the stored descriptor.
+- `0x0010B524`: the transition UI enqueues the stored descriptor.
 - `0x0008A38E`: the transition consumer selects the descriptor.
 - `0x0008A4CF`: the mission reload routine returns.
 
@@ -109,8 +111,8 @@ artifacts, not rendered HUD gameplay. This is tooling/short-route evidence.
 ## Independent remaining gates
 
 The coalesced short pairs and the normal-barrier gameplay/death/replay gate
-have no dependency on one another. GET default promotion waits for the full
-barrier gate; coalescing has separate correctness and rendering gates. The
+have no dependency on one another. The full barrier gate passed and GET is
+now the default in candidate157; coalescing has separate correctness and rendering gates. The
 single-host probe lock remains in place to protect shared GPU/input/save state.
 The remaining jobs are prepared independently; performance measurements must
 not overlap other game runs.
@@ -120,8 +122,14 @@ games/brute_force_e3/verify_get_progress.ps1 -Name perf156_get_title -Executable
 games/brute_force_e3/verify_upstream_v014.ps1 -Name perf156_barrier_replay_state -Executable brute_force_e3_perf156.exe -Seconds 1500 -Replay -GetProgress -GetMonitor
 ```
 
-The barrier replay gate is running. A matched rendered-gameplay profile and
-comparison, the five coalesced pairs, and gameplay profiling/audio measurement
-remain pending. Audio analysis should use long QPC/SamplesPlayed windows and
+The barrier replay gate completed in 1500.49 seconds with 4,127,051,976
+ring reads, zero far/invalid/untrusted reads, max lag `0x3FC`, 16,132,590
+publications, and zero freezes/backward jumps/in-ring CALLs. All 36,944
+post-arm event decisions had zero read-past violations. The state observer
+collected 5,987 samples without read errors. Death, replay request lineage,
+reload and resumed gameplay were verified; details are in `GET_DEFAULT_PROMOTION.md`.
+
+A matched rendered-gameplay comparison, the five coalesced pairs, and gameplay
+profiling/audio measurement remain pending. Audio analysis should use long QPC/SamplesPlayed windows and
 estimate clock drift from fed intervals; do not convert every short-window
 sample deficit or dry-queue count into a playback gap.

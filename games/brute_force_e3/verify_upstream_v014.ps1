@@ -1,10 +1,11 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Name,
-    [string]$Executable = 'brute_force_e3_perf152.exe',
+    [string]$Executable = 'brute_force_e3_prototype.exe',
     [ValidateRange(160,1800)][int]$Seconds = 600,
     [switch]$Mute,
-    [switch]$GetProgress,
-    [switch]$GetMonitor,
+    [switch]$GetProgress = $true,
+    [switch]$UseDefaultGetProgress,
+    [switch]$GetMonitor = $true,
     [switch]$ReleaseCoalesce,
     [switch]$Replay,
     [switch]$AudioEvidence,
@@ -13,6 +14,10 @@ param(
     [string]$CaptureFlips
 )
 $ErrorActionPreference = 'Stop'
+if ($UseDefaultGetProgress) {
+    if (-not $GetMonitor) {throw 'Default-policy qualification requires the GET monitor.'}
+    $GetProgress=$true
+}
 if ([bool]$FlipScript -xor [bool]$CaptureFlips) {throw 'Flip comparison requires both FlipScript and CaptureFlips.'}
 if ($FlipScript) {
     if ($Replay) {throw 'Flip comparison and replay qualification use separate routes.'}
@@ -39,7 +44,7 @@ $settingsTask = @{
     RECOMP_FB_WINDOW='1'; RECOMP_KEYBOARD='1'; RECOMP_QUIET='1'
     RECOMP_AUDIO_TRACE='1'; RECOMP_AUDIO_MUTE=$(if ($Mute) {'1'} else {$null})
     RECOMP_HW_RELEASE_COALESCE=$(if ($ReleaseCoalesce) {'1'} else {$null}); RECOMP_HW_RELEASE_BARRIER=$null
-    RECOMP_NV2A_IRQ_GATE=$null; RECOMP_NV2A_GET_PROGRESS=$(if ($GetProgress) {'1'} else {'0'})
+    RECOMP_NV2A_IRQ_GATE=$null; RECOMP_NV2A_GET_PROGRESS=$(if ($UseDefaultGetProgress) {$null} elseif ($GetProgress) {'1'} else {'0'})
     RECOMP_NV2A_GET_MONITOR=$(if ($GetMonitor) {'1'} else {$null}); RECOMP_NV2A_ORDER_TRACE=$null
     RECOMP_AUDIO_HOST=$(if ($AudioEvidence) {'1'} else {$null})
     RECOMP_AUDIO_DEVICE_TRACE=$(if ($AudioEvidence) {'1'} else {$null})
@@ -90,6 +95,8 @@ try {
         & python (Join-Path $PSScriptRoot 'analyze_get_progress.py') (Join-Path $PSScriptRoot "analysis/$Name") `
             --monitor-only --output (Join-Path $PSScriptRoot "analysis/$Name-get-monitor.json")
         if ($LASTEXITCODE -ne 0) {throw 'GET monitor qualification failed.'}
+        $summaryTask=Get-Content -LiteralPath (Join-Path $PSScriptRoot "analysis/$Name-get-monitor.json") -Raw | ConvertFrom-Json
+        if ($GetProgress -and -not $summaryTask.progress) {throw 'The native policy did not enable requested GET progress.'}
     }
     if ($Replay) {
         & python (Join-Path $PSScriptRoot 'validate_guest_route.py') (Join-Path $PSScriptRoot "analysis/$Name") `

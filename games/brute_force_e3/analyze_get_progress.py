@@ -9,6 +9,26 @@ import json
 import re
 from pathlib import Path
 
+def progress_mode(config, log):
+    """Use the binary's declared policy for an absent switch after promotion.
+
+    Older archived binaries had no policy report and defaulted off.
+    """
+    explicit = config.get("RECOMP_NV2A_GET_PROGRESS")
+    errors = []
+    if explicit not in (None, "0", "1"):
+        errors.append("ambiguous GET progress flag; use 0 or 1")
+    policies = re.findall(r"\[PB GET CONFIG\] progress=([01]) monitor=([01]) default=([01])", log)
+    if not policies:
+        return explicit == "1", errors
+    if len(set(policies)) != 1:
+        errors.append("native GET policy changed within one probe")
+    enabled, monitored, fallback = map(int, policies[-1])
+    expected = fallback if explicit is None else int(explicit == "1")
+    if enabled != expected or monitored != int(config.get("RECOMP_NV2A_GET_MONITOR") == "1"):
+        errors.append("native GET policy disagrees with the recorded configuration")
+    return bool(enabled), errors
+
 def summarize_monitor(prefix: Path):
     """Long-route monitor checks; does not claim SDK-wait trace coverage."""
     def side(suffix):
@@ -28,8 +48,6 @@ def summarize_monitor(prefix: Path):
     errors = []
     if config.get("RECOMP_NV2A_GET_MONITOR") != "1" or not monitor.get("reads"):
         errors.append("monitor missing or did not observe ring reads")
-    if config.get("RECOMP_NV2A_GET_PROGRESS") not in (None, "0", "1"):
-        errors.append("ambiguous GET progress flag; use 0 or 1")
     if gpu.get("pfb_trap_active") is not True or gpu.get("pfb_trap_matches_guest") is not True:
         errors.append("PFB trap not verified active")
     if any(config.get(k) is not None for k in ("RECOMP_NV2A_IRQ_GATE", "RECOMP_NV2A_PFB_POLL",
@@ -41,7 +59,8 @@ def summarize_monitor(prefix: Path):
         if any(row[k] for k in ("invalid_get", "untrusted_reads", "freezes", "backward_jumps", "ring_calls")):
             errors.append("monitor reports unsupported or failed execution")
             break
-    progress = config.get("RECOMP_NV2A_GET_PROGRESS") == "1"
+    progress, policy_errors = progress_mode(config, log)
+    errors.extend(policy_errors)
     waits = re.findall(r"\[PB WAIT\] checks=(\d+) events=(\d+) read_past=(\d+)", log)
     wait_monitor = dict(zip(("checks", "event_decisions", "event_read_past"), map(int, waits[-1]))) if waits else {}
     snapshot_wait_monitor = gpu.get("wait_monitor", {})
@@ -149,7 +168,8 @@ def summarize(prefix: Path):
         errors.append("pushbuffer or fence failure")
     if any(monitor.get(k) for k in ("invalid_get", "untrusted_reads", "freezes", "backward_jumps", "ring_calls")):
         errors.append("monitor reports unsupported or failed execution")
-    progress = config.get("RECOMP_NV2A_GET_PROGRESS") == "1"
+    progress, policy_errors = progress_mode(config, log)
+    errors.extend(policy_errors)
     wait_rows = re.findall(r"\[PB WAIT\] checks=(\d+) events=(\d+) read_past=(\d+)", log)
     wait_monitor = dict(zip(("checks", "event_decisions", "event_read_past"), map(int, wait_rows[-1]))) if wait_rows else {}
     if progress and wait_monitor.get("event_read_past"):

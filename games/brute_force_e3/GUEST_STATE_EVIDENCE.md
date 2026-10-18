@@ -2,7 +2,8 @@
 
 These are static mappings for the E3 XBE, SHA-256
 `bcf4fbfb1adc595a3d04fe1443f22fcc1ec61bee4909f2780783d6ba0a13c4de`.
-No death/replay runtime transition has yet been qualified using them.
+The candidate156 barrier replay run qualified the runtime sequence described
+below; see `GET_DEFAULT_PROMOTION.md` for the captures and totals.
 `guest_state.py` reads guest addresses through a supplied callback; it never
 executes a guest method or changes memory. `inspect_guest.py` records its result
 under `guest.game_state`, alongside the existing GPU/APU snapshot.
@@ -36,7 +37,7 @@ Their strings start five bytes after those offsets (length prefix then UTF-16).
 ## Replay checkpoints for persistent observation
 
 The implemented hooks also observe Replay Mission's fully prepared descriptor
-at `0x0008468F` (stack `ESP+0x14`, interface `ESI`) before it opens confirmation.
+at `0x0008468F` (stack `ESP+0x14`, interface `ESI`).
 `0x00111D43` observes the failure bit after the guest's other Squad Killed
 checks, without calling the predicate itself. `install_guest_state_hooks.py`
 restores all checkpoints after regeneration and fails on unexpected bodies.
@@ -44,16 +45,19 @@ restores all checkpoints after regeneration and fails on unexpected bodies.
 `validate_guest_route.py` combines the field transitions and checkpoint lineage;
 it does not infer replay from a single field or from confirmation preparation.
 
-Opening the confirmation is insufficient. `0x000845F0` constructs flags `6`,
-then invokes vtable `+0x30` (`0x00085D50`). This tears down the current world
-and opens a confirmation UI; `0x0010A920` saves the requested descriptor at
-UI object `+0x6C`. The following checkpoints distinguish later work:
+Preparation alone is insufficient. `0x000845F0` constructs flags `6`,
+then invokes vtable `+0x30` (`0x00085D50`). This initiates world teardown and
+transition UI work; `0x0010A920` saves the requested descriptor at UI object
+`+0x6C`. Runtime captures refine the initial static UI interpretation: restart
+confirmation is visible before preparation, while enqueue occurs after the
+intro/loading transition. Enqueue is not itself proof of the user clicking
+confirmation. The following checkpoints distinguish later work:
 
-1. **Accepted request:** immediately before guest instruction `0x0010B524`,
+1. **UI-enqueued request:** immediately before guest instruction `0x0010B524`,
    `EAX` is the stored descriptor, `ECX` the interface and `EDI` the UI object.
    This path calls interface vtable `+0x20`, enqueueing the request. Require
    `(MEM8(EAX)&0x1F)==6`; UI flag `MEM8(EDI+0x64)&0x80` is clear on this path.
-   The `0x0010B51F` alternative opens another confirmation and is not acceptance.
+   The `0x0010B51F` alternative takes a different UI path and does not enqueue here.
 2. **Consumed request:** immediately before `0x0008A38E`, `EBP` is the selected
    descriptor and `ESI` the interface. Require descriptor flags `6`. This is
    persistent-hook evidence that the request actually reached the consumer,
@@ -95,7 +99,7 @@ REA used the configured headless IDA provider. Complete records are retained in
 | Replay action dispatch `0x00087300` | `ev_616240d39f13876afc1ee440c0026bc826999afe655093f313ddafb3012fdfd6` |
 | Replay Mission preparation `0x000845F0` | `ev_2398f3776a8e4c8eb245319ad920e5d22cf3f50baf906187637a992eb0918eab` |
 | Pending descriptor `0x0010A920` | `ev_4fbfc57530c628f93c2ef3623bd20297724d64bcd46bc0522366957a8e931ba4` |
-| Acceptance/enqueue `0x0010B480` | `ev_a100611a28dedf8c663b486cfe15620b2f1e7ed449be5fab92fd3599c53187cd` |
+| UI enqueue `0x0010B480` | `ev_a100611a28dedf8c663b486cfe15620b2f1e7ed449be5fab92fd3599c53187cd` |
 | Transition consumer `0x0008A350` | `ev_22c4b2c07138ffb1e746e060cc6a7754b57bdda2794b772688f94eafa3a3f4da` |
 | Mission reload `0x00087820` | `ev_e2e883d8f660d89bb04d70090c8b5003709f0da29e3d715554cc5f2456ad2b61` |
 | SDK swap serial `0x00399DF0` | `ev_6ab8b43a72d5b4ff80d73b25fee1949c516ac8d2da4f0e87758288ab6493c00d` |

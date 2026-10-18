@@ -16,7 +16,7 @@ int xbox_FramebufferKeyDown(int vk){(void)vk;return 0;}
 int main(void)
 {
     uint8_t report[20];
-    _putenv_s("RECOMP_PAD_SCRIPT","f10:a:3,f12:p2-rt:2,40:b:15");
+    _putenv_s("RECOMP_PAD_SCRIPT","f0010:a:03,f0012:p2-rt:02,40:b:15");
     _putenv_s("RECOMP_PAD_SCRIPT_EXCLUSIVE","1");
     _putenv_s("RECOMP_PAD_LIVE","");_putenv_s("RECOMP_PAD_PRESS","");
     _putenv_s("RECOMP_INPUT_DIAG","");
@@ -55,7 +55,7 @@ int main(void)
     _putenv_s("RECOMP_NV2A_GET_PROGRESS","0");
     assert(nv2a_get_flag("RECOMP_NV2A_GET_PROGRESS",1)==0); /* future default on */
     _putenv_s("RECOMP_NV2A_GET_PROGRESS","1");assert(nv2a_get_progress_enabled()==1);
-    _putenv_s("RECOMP_NV2A_GET_PROGRESS","");assert(nv2a_get_progress_enabled()==0);
+    _putenv_s("RECOMP_NV2A_GET_PROGRESS","");assert(nv2a_get_progress_enabled()==1);
     _putenv_s("RECOMP_NV2A_GET_MONITOR","0");assert(nv2a_get_monitor_enabled()==0);
     _putenv_s("RECOMP_NV2A_GET_MONITOR","1");assert(nv2a_get_monitor_enabled()==1);
     _putenv_s("RECOMP_NV2A_GET_MONITOR","");assert(nv2a_get_monitor_enabled()==0);

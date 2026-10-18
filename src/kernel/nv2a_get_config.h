@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Promotion waits for gameplay/death/replay qualification. The explicit 0
- * override remains effective when this default eventually becomes 1. */
-#define NV2A_GET_PROGRESS_DEFAULT 0
+/* Qualified normal-barrier gameplay/death/replay. Explicit 0 is rollback;
+ * monitor remains independently off by default. */
+#define NV2A_GET_PROGRESS_DEFAULT 1
 static inline int nv2a_get_flag(const char *name, int fallback)
 {
     const char *value = getenv(name);

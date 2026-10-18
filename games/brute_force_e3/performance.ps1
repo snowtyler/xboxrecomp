@@ -21,7 +21,7 @@ param(
     [switch]$TextureEpoch,
     [switch]$IrqGate,
     [switch]$OrderTrace,
-    [switch]$GetProgress,
+    [switch]$GetProgress = $true,
     [switch]$GetMonitor,
     [switch]$TitleProbe
 )

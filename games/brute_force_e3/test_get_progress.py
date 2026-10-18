@@ -103,5 +103,19 @@ class QualificationTests(unittest.TestCase):
                 log.write_text(text)
                 self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"])
 
+    def test_native_default_policy_and_explicit_rollback_are_distinguished(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            prefix = self.fixture(Path(directory))
+            path = prefix.with_name(prefix.name + "-process.json")
+            metadata = json.loads(path.read_text())
+            metadata["configuration"]["RECOMP_NV2A_GET_PROGRESS"] = None
+            path.write_text(json.dumps(metadata))
+            log = prefix.with_name(prefix.name + ".stderr.log")
+            log.write_text(log.read_text()+"[PB GET CONFIG] progress=1 monitor=1 default=1\n")
+            self.assertTrue(summarize_monitor(prefix)["automated_checks_passed"])
+            metadata["configuration"]["RECOMP_NV2A_GET_PROGRESS"] = "0"
+            path.write_text(json.dumps(metadata))
+            self.assertFalse(summarize_monitor(prefix)["automated_checks_passed"])
+
 if __name__ == "__main__":
     unittest.main()

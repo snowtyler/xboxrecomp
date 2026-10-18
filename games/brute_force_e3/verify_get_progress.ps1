@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Name,
-    [string]$Executable='brute_force_e3_perf151.exe',
+    [string]$Executable='brute_force_e3_prototype.exe',
     [ValidateRange(1,10)][int]$Pairs=5,
     [ValidateRange(160,300)][int]$Seconds=180,
     [switch]$Barrier

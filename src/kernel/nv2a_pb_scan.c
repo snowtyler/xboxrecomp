@@ -279,9 +279,15 @@ void nv2a_pb_bind_get_io(uint32_t (*read_get)(void),void (*publish)(uint32_t))
 {s_get_read=read_get;s_get_publish=publish;}
 void nv2a_pb_get_submission(uint32_t final_put)
 {
+    static int policy_reported;
     s_get_final=final_put;s_get_frozen=0;
     s_get_enabled=nv2a_get_progress_enabled();
     s_get_monitor=nv2a_get_monitor_enabled();
+    if(!policy_reported&&(s_get_enabled||s_get_monitor)) {
+        policy_reported=1;
+        fprintf(stderr,"[PB GET CONFIG] progress=%d monitor=%d default=%d\n",
+            s_get_enabled,s_get_monitor,NV2A_GET_PROGRESS_DEFAULT);
+    }
     s_get_last=s_get_read?s_get_read():0;
 }
 static int get_in_ring(uint32_t va){return va>=s_ring_low&&va<s_ring_high;}
