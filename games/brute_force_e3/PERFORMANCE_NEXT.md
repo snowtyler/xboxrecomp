@@ -4,10 +4,13 @@ October 20 quick-win follow-up: [candidate163 and lighter profiling](QUICK_WINS_
 Caching flags reduced the measured executor `getenv` hotspot from 4.73% to
 0.048%; unused packing/texture/trap clocks are guarded. The existing bulk-copy
 arm did not establish a performance benefit and stays off by default. CPU
-fixtures and the two light traces are complete; combat Nsight collection is
-pending cleanup of a stalled tool preflight and Windows administrator consent.
-The named prototype and qualified policies remain unchanged. Next: finish the
-GPU/CPU timelines, qualify texture epochs, then develop target residency.
+fixtures, the two light traces and both non-injecting Nsight combat captures
+are complete. Global graphics activity averaged 92.7% in the barrier window
+and 16.6% in the coalesced window, with changing external load and an offline
+export overlapping the latter; this is not a coalescing performance comparison.
+NVIDIA per-process 3D execution remains unavailable. The named prototype and
+qualified policies remain unchanged. Next: qualify texture epochs, then develop
+target residency; preserve the concurrent-load limitation in further profiling.
 
 Standard-profiler follow-up: [WPR/WPA and RenderDoc](PROFILE_WPR_RENDERDOC.md)
 records the combat ETL, sampled/precise wait stacks and a 1,161-draw frame with

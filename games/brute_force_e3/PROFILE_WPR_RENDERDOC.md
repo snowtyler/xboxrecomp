@@ -2,6 +2,12 @@
 
 Captured October 19, 2026; analysis completed October 20. Diagnostic only.
 
+October 20 follow-up: [candidate163 quick wins and Nsight combat windows](QUICK_WINS_163.md)
+records the flag/timing changes and lighter CPU captures. Non-injecting Nsight
+now measures physical GPU activity, but per-process NVIDIA 3D execution remains
+unavailable. Changed concurrent load prevents a barrier/coalesced speed claim;
+the earlier results below retain their original measurement scope.
+
 **Recommendation: target residency and CPU-consumer observation next.** This
 route spends substantial host CPU on readback/coherence and command preparation,
 while a captured frame also performs real GPU work: **16.85 ms** summed GPU
