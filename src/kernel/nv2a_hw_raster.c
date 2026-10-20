@@ -751,7 +751,9 @@ static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
 {
     if(!nv2a_hw_acquire_input(t->raw,t->raw_bytes)||
        !nv2a_hw_acquire_input(t->palette,t->palette_bytes))return NULL;
-    LARGE_INTEGER started,decoded,ended;QueryPerformanceCounter(&started);++g.tex_calls;
+    LARGE_INTEGER started,decoded,ended;
+    if(g.profile)QueryPerformanceCounter(&started);
+    ++g.tex_calls;
     Tex *entry=NULL;unsigned i;uint32_t w=t->width?t->width:1,h=t->height?t->height:1,faces=t->cube?6:1,x,y,f;
     uint32_t levels=t->sample_mip&&t->levels?t->levels:1,max_levels=1;
     for(uint32_t dim=w>h?w:h;dim>1;dim>>=1)++max_levels;
@@ -803,12 +805,14 @@ static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
         for(y=0;y<lh;y++)for(x=0;x<lw;x++)pixels[cursor+(size_t)y*lw+x]=t->sample_mip?t->sample_mip(t->opaque,f,lv,x,y):t->sample?t->sample(t->opaque,f,x,y):0xFFFFFFFF;
         cursor+=(size_t)lw*lh;
     }
-    QueryPerformanceCounter(&decoded);g.tex_decode_ticks+=decoded.QuadPart-started.QuadPart;g.texels+=face_texels*faces;
+    if(g.profile){QueryPerformanceCounter(&decoded);g.tex_decode_ticks+=decoded.QuadPart-started.QuadPart;}
+    g.texels+=face_texels*faces;
     D3D11_TEXTURE2D_DESC td={0};td.Width=w;td.Height=h;td.MipLevels=levels;td.ArraySize=faces;td.SampleDesc.Count=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
     ID3D11Texture2D *resource=NULL;HRESULT hr=ID3D11Device_CreateTexture2D(g.device,&td,data,&resource);free(pixels);
     D3D11_SHADER_RESOURCE_VIEW_DESC vd={0};vd.Format=td.Format;vd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;vd.Texture2DArray.MipLevels=levels;vd.Texture2DArray.ArraySize=faces;
     if(SUCCEEDED(hr))hr=ID3D11Device_CreateShaderResourceView(g.device,(ID3D11Resource*)resource,&vd,&entry->srv);
-    RELEASE(resource,ID3D11Texture2D);++g.uploads;QueryPerformanceCounter(&ended);g.tex_upload_ticks+=ended.QuadPart-decoded.QuadPart;
+    RELEASE(resource,ID3D11Texture2D);++g.uploads;
+    if(g.profile){QueryPerformanceCounter(&ended);g.tex_upload_ticks+=ended.QuadPart-decoded.QuadPart;}
     if(SUCCEEDED(hr)) {
         entry->validated_epoch=validation.epoch;
         if(g.texture_hash) {
@@ -817,7 +821,7 @@ static ID3D11ShaderResourceView *texture(const Nv2aHwTexture *t)
             g.texture_buckets[bucket]=(uint32_t)(entry-g.textures)+1;
         }
     }
-    if(g.uploads%500==0){LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW TEXTURE] calls=%llu hits=%llu uploads=%llu direct=%llu decode %.2f ms/upload upload %.2f ms/upload last=%p %ux%u fmt=%02X texels=%llu\n",(unsigned long long)g.tex_calls,(unsigned long long)g.tex_hits,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads,g.tex_decode_ticks*1000.0/freq.QuadPart/g.uploads,g.tex_upload_ticks*1000.0/freq.QuadPart/g.uploads,t->raw,w,h,t->format,(unsigned long long)g.texels);}
+    if(g.profile&&g.uploads%500==0){LARGE_INTEGER freq;QueryPerformanceFrequency(&freq);fprintf(stderr,"[HW TEXTURE] calls=%llu hits=%llu uploads=%llu direct=%llu decode %.2f ms/upload upload %.2f ms/upload last=%p %ux%u fmt=%02X texels=%llu\n",(unsigned long long)g.tex_calls,(unsigned long long)g.tex_hits,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads,g.tex_decode_ticks*1000.0/freq.QuadPart/g.uploads,g.tex_upload_ticks*1000.0/freq.QuadPart/g.uploads,t->raw,w,h,t->format,(unsigned long long)g.texels);}
     return FAILED(hr)?NULL:entry->srv;
 }
 static ID3D11PixelShader *shader(const Nv2aHwState *s)

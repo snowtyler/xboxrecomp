@@ -401,7 +401,9 @@ static uint32_t pb_walk(uint32_t va,uint32_t end_va,int ignored,uint32_t *jumps,
             if(get_in_ring(target)){++g_nv2a_get_stats.ring_calls;get_freeze(from,4);}
             get_progress(va,1);
             return_va=va;va=target;end_va=va+0x400000u;child=1;s_tot_calls++;
-            if(getenv("RECOMP_PB_CALL_TRACE"))fprintf(stderr,"[PB CALL] from=%08X target=%08X return=%08X last_nop=%08X flags=%u\n",from,va,return_va,s_last_nop,s_last_nop&31);
+            static int call_trace=-1;
+            if(call_trace<0)call_trace=getenv("RECOMP_PB_CALL_TRACE")!=NULL;
+            if(call_trace)fprintf(stderr,"[PB CALL] from=%08X target=%08X return=%08X last_nop=%08X flags=%u\n",from,va,return_va,s_last_nop,s_last_nop&31);
             continue;
         }
         if(!resumed&&(w&0xE0030003u)!=0&&(w&0xE0030003u)!=0x40000000u){pb_capture_first(root_start,root_end,from,w);pb_reject(unknown);continue;}

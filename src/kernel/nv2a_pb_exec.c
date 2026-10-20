@@ -53,6 +53,31 @@
 #define NV_TLS __thread
 #endif
 
+/* Executor flags are launch configuration. File-triggered tracing still
+ * checks its cached path on each flip so it can be armed during a run. */
+static int pb_verbose_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_PB_EXEC_VERBOSE")!=NULL;return on;}
+static int movie_order_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_MOVIE_ORDER")!=NULL;return on;}
+static int writer_trace_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_SDK_WRITER_TRACE")!=NULL;return on;}
+static int frame_vertices_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_FRAME_TRACE_VERTICES")!=NULL;return on;}
+static int find_nan_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_FIND_NAN")!=NULL;return on;}
+static int find_quad_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_FIND_QUAD")!=NULL;return on;}
+static int gpu_timing_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_GPU_TIMING")!=NULL;return on;}
+static int cpu_timing_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_HW_CPU_TIMING")!=NULL;return on;}
+static int hw_counters_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_HW_COUNTERS")!=NULL;return on;}
+static int tex_state_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_TEX_STATE")!=NULL;return on;}
+static int unhandled_all_enabled(void)
+{static int on=-1;if(on<0)on=getenv("RECOMP_PB_UNHANDLED_ALL")!=NULL;return on;}
+
 extern ptrdiff_t xbox_GetMemoryOffset(void);
 extern void xbox_FramebufferWindowSet(uint32_t fb_va, uint32_t pitch);
 extern void xbox_FramebufferWindowStart(void);
@@ -630,7 +655,8 @@ static uint32_t s_capture_guest_flip;
 
 static void dump_surface_bmp_at(uint32_t alternate_offset)
 {
-    const char *prefix = getenv("RECOMP_FB_DUMP");
+    static const char *prefix;static int configured;
+    if(!configured){prefix=getenv("RECOMP_FB_DUMP");configured=1;}
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     int drawn = s_gpu.drawn_offset != 0;
     uint32_t offset = drawn ? s_gpu.drawn_offset : s_gpu.color_offset;
@@ -737,7 +763,7 @@ static void clear_surface(uint32_t param)
     uint8_t *mem = (uint8_t *)xbox_GetMemoryOffset();
     uint32_t bpp = surface_bpp();
     Nv2aClearRect rect;
-    if (getenv("RECOMP_MOVIE_ORDER")) {
+    if (movie_order_enabled()) {
         static unsigned order_clears;
         if (order_clears++ < 128)
             fprintf(stderr, "[MOVIE ORDER] gpu clear offset=%08X mask=%08X\n", s_gpu.color_offset, param);
@@ -1128,7 +1154,8 @@ static int sample_texture(uint32_t u, uint32_t v, uint32_t *argb)
  */
 static void dump_texture_bmp(uint32_t seq)
 {
-    const char *prefix = getenv("RECOMP_TEX_DUMP");
+    static const char *prefix;static int configured;
+    if(!configured){prefix=getenv("RECOMP_TEX_DUMP");configured=1;}
     uint32_t w = s_gpu.texs[0].width, h = s_gpu.texs[0].height, x, y;
     uint32_t row_bytes, pad, filesz;
     uint8_t hdr[54];
@@ -1197,7 +1224,7 @@ static int surface_begin_batch(const uint8_t *mem)
     /* The prototype supplies a dummy color surface for depth-only passes.
      * Zero is safe only while all color writes are disabled; it must never
      * become a color destination overlapping the live command/USB storage. */
-    if(!s_gpu.color_offset && getenv("RECOMP_SDK_WRITER_TRACE")) {
+    if(!s_gpu.color_offset && writer_trace_enabled()) {
         static int traced;
         if(!traced++)fprintf(stderr,"[GPU ZERO DRAW] color_mask=%08X zeta=%08X depth_test=%u depth_mask=%u pitch=%u clip=%ux%u\n",s_gpu.color_mask,s_gpu.zeta_offset,s_gpu.depth_test,s_gpu.depth_mask,s_gpu.pitch,s_gpu.clip_w,s_gpu.clip_h);
     }
@@ -2267,7 +2294,8 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
         if(a<b+(size_t)state.pitch*state.height&&b<a+out->raw_bytes)return 0;
     }
     if(program) {
-        uint64_t pack_start=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
+        int timing=gpu_timing_enabled()||cpu_timing_enabled();
+        uint64_t pack_start=timing?(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart:0;
         static int gather_all=-1;
         if(gather_all<0)gather_all=getenv("RECOMP_HW_VSH_GATHER_ALL")!=NULL;
         uint32_t input_mask=gather_all?0xFFFFu:nv2a_vsh_input_mask(program);
@@ -2286,11 +2314,11 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
             }
         }
         for(i=0;i<n;i++)s_hw_indices[i]=s_hw_input_map[s_hw_indices[i]];
-        uint64_t packed=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
-        s_hw_pack_ticks+=packed-pack_start;s_hw_input_rows+=unique;
+        uint64_t packed=timing?(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart:0;
+        if(timing)s_hw_pack_ticks+=packed-pack_start;s_hw_input_rows+=unique;
         s_hw_attr_slots+=(uint64_t)unique*16;s_hw_attr_reads+=(uint64_t)unique*input_count;
         if(!nv2a_hw_draw_raw(&state,s_hw_inputs,unique,s_hw_indices,n,program))return 0;
-        s_hw_submit_ticks+=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-packed;
+        if(timing)s_hw_submit_ticks+=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-packed;
     } else {
         memcpy(s_hw_vertices,s_xf,count*sizeof *s_xf);for(i=0;i<count;i++)s_hw_vertices[i].fog[0]=fog_factor(s_xf[i].fog[0]);
         if(!nv2a_hw_draw(&state,s_hw_vertices,count,s_hw_indices,n))return 0;
@@ -2318,7 +2346,7 @@ static void raster_batch_program(void)
     uint32_t i, n = s_gpu.idx_count;
     static int timing = -1;
     uint64_t started = 0, transformed = 0;
-    if (timing < 0) timing = getenv("RECOMP_GPU_TIMING") != NULL || getenv("RECOMP_HW_CPU_TIMING") != NULL;
+    if (timing < 0) timing = gpu_timing_enabled() || cpu_timing_enabled();
     if (timing) started = (uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
     static int raw_vertex=-1;if(raw_vertex<0)raw_vertex=getenv("RECOMP_HW_VERTEX")!=NULL;
     if(raw_vertex&&nv2a_hw_enabled()&&nv2a_vsh_cacheable()) {
@@ -2626,7 +2654,7 @@ static void draw_primitive(void)
         uint64_t p0 = s_gpu.pixels, df0 = s_gpu.xf_depth_fail;
         raster_batch();
         if (s_ftrace == 2) {
-            if (getenv("RECOMP_FRAME_TRACE_VERTICES")) {
+            if (frame_vertices_enabled()) {
                 uint32_t slot, vi;
                 if (s_gpu.attr[0].type == 5 && s_gpu.attr[0].size == 2) {
                     nv2a_vsh_dump_current();
@@ -2698,7 +2726,7 @@ static void draw_primitive(void)
         }
     }
 
-    if (getenv("RECOMP_PB_EXEC_VERBOSE")) {
+    if (pb_verbose_enabled()) {
         static int shown;
         if (shown++ < 6) {
             fprintf(stderr, "  [GPU] prim %u, %u indices, pos attr:"
@@ -3093,7 +3121,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
      * uncached getenv here was a quarter of the executor's time. */
     static int verbose = -1;
     if (verbose < 0)
-        verbose = getenv("RECOMP_PB_EXEC_VERBOSE") != NULL;
+        verbose = pb_verbose_enabled();
     if (verbose) {
         static int shown[8];
         int slot = -1;
@@ -3141,9 +3169,10 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
              * semaphore writes, before the original ISR can recycle data. */
             if(!xbox_Nv2aFenceBatchFlush())return;
             nv2a_order_trace(NV_ORDER_TRAP,1,subch,param,0);
-            uint64_t began=(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart;
+            int timing=hw_counters_enabled();
+            uint64_t began=timing?(uint64_t)xbox_KeQueryPerformanceCounter().QuadPart:0;
             if(!xbox_Nv2aSoftwareNotify(subch,param))note_unhandled(method,param);
-            nv2a_hw_perf_trap_wait((uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-began);
+            if(timing)nv2a_hw_perf_trap_wait((uint64_t)xbox_KeQueryPerformanceCounter().QuadPart-began);
             nv2a_hw_guest_write();
             nv2a_order_trace(NV_ORDER_TRAP,2,subch,param,0);
         }
@@ -3359,7 +3388,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
          * GPU until a CPU raster, clear or target change needs it. */
         if(!nv2a_hw_sync_reason(NV2A_SYNC_FLIP,0)){xbox_Nv2aFenceBatchFail();return;}
         nv2a_hw_perf_event(NV2A_PERF_FLIP);
-        if (getenv("RECOMP_MOVIE_ORDER")) {
+        if (movie_order_enabled()) {
             static unsigned order_flips;
             if (order_flips++ < 128)
                 fprintf(stderr, "[MOVIE ORDER] gpu flip drawn=%08X color=%08X\n", s_gpu.drawn_offset, s_gpu.color_offset);
@@ -3460,7 +3489,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         }
         s_gpu.drawn_stale = 1;
 
-        if (getenv("RECOMP_PB_EXEC_VERBOSE")) {
+        if (pb_verbose_enabled()) {
             static unsigned n;
             if (n++ < 8) {
                 fprintf(stderr, "  [GPU] flip %u: read=%u write=%u\n",
@@ -3664,7 +3693,8 @@ static void find_nan_matrices(void)
  * pointer or a number", and guessing wrong costs a run. */
 static void peek_addresses(void)
 {
-    const char *spec = getenv("RECOMP_PEEK");
+    static const char *spec;static int configured;
+    if(!configured){spec=getenv("RECOMP_PEEK");configured=1;}
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     char buf[256];
     char *tok, *ctx = NULL;
@@ -3695,7 +3725,8 @@ static void peek_addresses(void)
  */
 static void peek_chain(void)
 {
-    const char *spec = getenv("RECOMP_PEEK_CHAIN");
+    static const char *spec;static int configured;
+    if(!configured){spec=getenv("RECOMP_PEEK_CHAIN");configured=1;}
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     char buf[256], *tok, *ctx = NULL;
     uint32_t cur = 0;
@@ -3733,13 +3764,13 @@ void nv2a_pb_exec_report(void)
 {
     peek_addresses();
     peek_chain();
-    if (getenv("RECOMP_FIND_NAN")) {
+    if (find_nan_enabled()) {
         /* Every report, not once: the matrix is fine early on and only turns
          * to NaN later, so a single scan at startup finds nothing and says
          * nothing. */
         find_nan_matrices();
     }
-    if (getenv("RECOMP_FIND_QUAD")) {
+    if (find_quad_enabled()) {
         static int done;
         if (!done) { done = 1; find_quad_vertices(); }
     }
@@ -3757,7 +3788,7 @@ void nv2a_pb_exec_report(void)
         last_flips = s_gpu.flips;
         last_ms = now;
     }
-    if (getenv("RECOMP_GPU_TIMING")) {
+    if (gpu_timing_enabled()) {
         static uint64_t last_pack,last_submit,last_rows,last_attr_reads,last_attr_slots;static uint32_t last_raw_flips;
         uint32_t raw_frames=s_gpu.flips-last_raw_flips;double raw_frequency=(double)xbox_KeQueryPerformanceFrequency().QuadPart;
         if(raw_frames)fprintf(stderr,"[HW INPUT] packing %.2f ms/frame submit %.2f ms/frame rows %llu/frame\n",(s_hw_pack_ticks-last_pack)*1000.0/raw_frequency/raw_frames,(s_hw_submit_ticks-last_submit)*1000.0/raw_frequency/raw_frames,(unsigned long long)((s_hw_input_rows-last_rows)/raw_frames));
@@ -3846,7 +3877,7 @@ void nv2a_pb_exec_report(void)
                     : d3d8_format_is_swizzled(s_tex_use[i].color) ? " swz" : " lin",
                 s_tex_use[i].batches);
 
-    if (getenv("RECOMP_TEX_STATE")) {
+    if (tex_state_enabled()) {
         uint32_t k;
         for (k = 0; k < sizeof s_tex_set / sizeof s_tex_set[0]; k++)
             if (s_tex_set[k])
@@ -3863,7 +3894,7 @@ void nv2a_pb_exec_report(void)
      * stopped on, the answer is as likely to be the one seen twice as the
      * one seen a thousand times, and ten hides it. */
     {
-        int shown = getenv("RECOMP_PB_UNHANDLED_ALL") ? s_unhandled_count : 10;
+        int shown = unhandled_all_enabled() ? s_unhandled_count : 10;
     for (i = 0; i < shown && i < s_unhandled_count; i++) {
         int best = i;
         for (j = i + 1; j < s_unhandled_count; j++)
