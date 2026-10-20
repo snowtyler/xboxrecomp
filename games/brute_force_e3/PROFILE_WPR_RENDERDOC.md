@@ -2,6 +2,12 @@
 
 Captured October 19, 2026; analysis completed October 20. Diagnostic only.
 
+Later October 20: [the quiet-GPU candidate163 pair](QUIET_GPU_170.md) records
+19.52 versus 28.64 flips/s with reduced readback-related CPU and approximately
+5.4 ms/flip texture comparison in both arms. It recommends texture epochs
+qualification next and residency/CPU-consumer observation as the structural
+track. The earlier RenderDoc and wait analysis below retain their original scope.
+
 October 20 follow-up: [candidate163 quick wins and Nsight combat windows](QUICK_WINS_163.md)
 records the flag/timing changes and lighter CPU captures. Non-injecting Nsight
 now measures physical GPU activity, but per-process NVIDIA 3D execution remains

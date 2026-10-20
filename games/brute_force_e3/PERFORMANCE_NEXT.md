@@ -1,5 +1,19 @@
 # Next performance work: stable 60 FPS
 
+Quiet-GPU follow-up: [the completed candidate163 comparison](QUIET_GPU_170.md)
+records approximately 19.52 versus 28.64 flips/s in the two traced windows.
+Readback Map/poll/driver CPU falls from an estimated 19.23 to 10.86 ms/flip;
+copy CPU from 4.78 to 0.64 ms/flip. Texture comparison stays near 5.4 ms/flip.
+Both arms have reviewed HUD frames and living-campaign state; exports ran only
+after both games finished. Input/scene drift and tracing limit this to a
+diagnostic pair, not a qualified speedup. The earlier [interrupted attempt](QUIET_GPU_167.md)
+remains excluded. No further UAC prompts were needed with the installed helper.
+[Target residency design](TARGET_RESIDENCY_DESIGN.md) is a draft with
+eager coherence retained initially, followed by an explicit CPU-consumer and
+alias-coverage prerequisite for removing readbacks. Texture epochs qualification
+comes next; launch-flag caching still needs the normal gameplay gate before
+promotion. Bulk readback is not carried forward as a performance candidate.
+
 October 20 quick-win follow-up: [candidate163 and lighter profiling](QUICK_WINS_163.md).
 Caching flags reduced the measured executor `getenv` hotspot from 4.73% to
 0.048%; unused packing/texture/trap clocks are guarded. The existing bulk-copy
