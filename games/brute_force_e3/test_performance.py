@@ -31,11 +31,13 @@ class CounterTests(unittest.TestCase):
         for index, row in enumerate((before, after), 1):
             row.update(color_readback_bytes=index*4096, depth_readback_bytes=index*1024)
             row["sync"]["release"].update(work_ms=index*8, color_readbacks=index,
-                depth_readbacks=index, readback_bytes=index*5120, cpu_ms=index*6, cpu_errors=0)
+                depth_readbacks=index, readback_bytes=index*5120, cpu_ms=index*6,
+                cpu_cycles=index*6000, cpu_errors=0)
         delta=performance.counter_delta(before, after)
         self.assertEqual(delta["color_readback_bytes"],4096)
         self.assertEqual(delta["sync"]["release"]["readback_bytes"],5120)
-        self.assertEqual(delta["sync"]["release"]["cpu_ms"],6)
+        self.assertIsNone(delta["sync"]["release"]["cpu_ms"])
+        self.assertEqual(delta["sync"]["release"]["cpu_cycles"],6000)
         after["depth_readback_bytes"]=0
         self.assertIsNone(performance.counter_delta(before,after))
 

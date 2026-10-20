@@ -46,8 +46,8 @@ PHASE_NAMES = ("shader", "target", "texture", "stream", "uniforms", "bind/draw")
 COUNTER_KEYS = ("draws", "segments", "color", "depth", "fences", "trap_ms",
                 "texture_compare_bytes", "snapshot_compare_bytes", "vertex_upload_bytes",
                 "releases", "traps", "wait_for_idle", "flips", "clears", "ack_idle")
-OPTIONAL_COUNTER_KEYS = ("color_readback_bytes", "depth_readback_bytes")
-OPTIONAL_SYNC_KEYS = ("work_ms", "color_readbacks", "depth_readbacks", "readback_bytes", "cpu_ms", "cpu_errors")
+OPTIONAL_COUNTER_KEYS = ("color_readback_bytes", "depth_readback_bytes", "executor_cycles")
+OPTIONAL_SYNC_KEYS = ("work_ms", "color_readbacks", "depth_readbacks", "readback_bytes", "cpu_ms", "cpu_cycles", "cpu_errors")
 
 
 def utc_text(epoch):
@@ -164,6 +164,9 @@ def counter_delta(before, after):
         delta["sync"][cause].update({key: current[key]-previous[key]
             if current.get(key) is not None and previous.get(key) is not None else None
             for key in OPTIONAL_SYNC_KEYS})
+        # Legacy per-call GetThreadTimes sums can exceed wall time. Preserve
+        # original reports, but never aggregate them as qualified CPU time.
+        delta["sync"][cause]["cpu_ms"] = None
         delta["sync"][cause]["outcomes"] = [b-a for a, b in zip(previous["outcomes"], current["outcomes"])]
     old_targets = {(item["width"], item["height"], item["bpp"]): item["count"] for item in before["targets"]}
     delta["targets"] = [{**item, "count": item["count"] - old_targets.get((item["width"], item["height"], item["bpp"]), 0)}
@@ -198,6 +201,7 @@ def summarize_counters(intervals):
         totals["sync"][cause].update({key: sum(item["sync"][cause][key] for item in values)
             if all(item["sync"][cause].get(key) is not None for item in values) else None
             for key in OPTIONAL_SYNC_KEYS})
+        totals["sync"][cause]["cpu_ms"] = None
     targets = {}
     for item in values:
         for target in item["targets"]:

@@ -10,10 +10,10 @@
 static RECOMP_TLS uint32_t s_wait_serial;
 static RECOMP_TLS uint64_t s_begin,s_poll;
 static RECOMP_TLS uint32_t s_path;
-/* Optional cumulative per-thread observations. QPC is wall time; thread times
+/* Optional cumulative per-thread observations. QPC is wall time; CPU cycles
  * exclude descheduling. No per-iteration hook is added to the busy loop. */
 typedef struct WaitProfile {
-    uint64_t begin_cpu, stage_cpu, stage_qpc, last_report;
+    uint64_t stage_cpu, stage_qpc, last_report;
     uint64_t completed, poll_count, event_count, poll_qpc, event_qpc;
     uint64_t poll_cpu, event_cpu, cpu_errors;
     int active, stage, cpu_valid;
@@ -26,6 +26,12 @@ static int profile_enabled(void)
     return value;
 }
 static int thread_cpu(uint64_t *result)
+{
+    ULONG64 cycles=0;
+    if(!QueryThreadCycleTime(GetCurrentThread(),&cycles))return 0;
+    *result=cycles;return 1;
+}
+static int thread_time(uint64_t *result)
 {
     FILETIME created,exited,kernel,user;
     if(!GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user))return 0;
@@ -96,12 +102,16 @@ void brute_force_get_wait_end(void)
         }
         s_profile.active=0;
         if((uint64_t)q.QuadPart-s_profile.last_report>=(uint64_t)f.QuadPart*2) {
-            fprintf(stderr,"[SDK WAIT PROFILE] {\"version\":1,\"tid\":%lu,\"qpc_ms\":%.3f,\"completed\":%llu,\"poll_count\":%llu,\"event_count\":%llu,\"poll_wall_ms\":%.3f,\"event_wall_ms\":%.3f,\"poll_cpu_ms\":%.3f,\"event_cpu_ms\":%.3f,\"cpu_errors\":%llu}\n",
+            uint64_t total_cpu=0;int total_valid=thread_time(&total_cpu);
+            char cpu_text[64];if(total_valid)snprintf(cpu_text,sizeof cpu_text,"%.3f",total_cpu/10000.0);
+            else snprintf(cpu_text,sizeof cpu_text,"null");
+            fprintf(stderr,"[SDK WAIT PROFILE] {\"version\":2,\"tid\":%lu,\"qpc_ms\":%.3f,\"completed\":%llu,\"poll_count\":%llu,\"event_count\":%llu,\"poll_wall_ms\":%.3f,\"event_wall_ms\":%.3f,\"poll_cpu_ms\":null,\"event_cpu_ms\":null,\"poll_cycles\":%llu,\"event_cycles\":%llu,\"thread_cycles\":%llu,\"thread_cpu_ms\":%s,\"cpu_errors\":%llu}\n",
                 GetCurrentThreadId(),q.QuadPart*1000.0/f.QuadPart,
                 (unsigned long long)s_profile.completed,(unsigned long long)s_profile.poll_count,
                 (unsigned long long)s_profile.event_count,s_profile.poll_qpc*1000.0/f.QuadPart,
-                s_profile.event_qpc*1000.0/f.QuadPart,s_profile.poll_cpu/10000.0,
-                s_profile.event_cpu/10000.0,(unsigned long long)s_profile.cpu_errors);
+                s_profile.event_qpc*1000.0/f.QuadPart,(unsigned long long)s_profile.poll_cpu,
+                (unsigned long long)s_profile.event_cpu,(unsigned long long)cpu,cpu_text,
+                (unsigned long long)s_profile.cpu_errors);
             s_profile.last_report=(uint64_t)q.QuadPart;
         }
     }

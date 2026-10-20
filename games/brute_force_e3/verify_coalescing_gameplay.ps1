@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Name,
     [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9_-]+$')][string]$ShortPairs,
     [string]$Executable='brute_force_e3_perf159.exe',
-    [ValidateRange(550,900)][int]$Seconds=600,
+    [ValidateRange(550,900)][int]$Seconds=640,
     [ValidateRange(640,900)][int]$LeanSeconds=640
 )
 $ErrorActionPreference='Stop'
@@ -39,8 +39,8 @@ $stateTask.status='running';$stateTask.current='native_gpu_checks';Save-Gameplay
 if($LASTEXITCODE -ne 0){throw 'Semaphore regression failed.'}
 & ctest --test-dir (Join-Path $rootTask 'build/nv2a-gpu') -C Release -R 'raster-coherence|coalesced-inputs' --output-on-failure
 if($LASTEXITCODE -ne 0){throw 'Raster/input regression failed.'}
-$flipScriptTask='f4500:start:24,f5700:start:24,f6300:a:24,f6600:down:24,f6900:a:24,f24000:y:24,f24500:y:24,f25000:lup:12,f26000:rt:24,f27000:rright:4,f28000:rt:24'
-$captureFlipsTask='23500,24500,25500,26500,27500,28500,29500,30000'
+$flipScriptTask='f4500:start:24,f5700:start:24,f6300:a:24,f6600:down:24,f6900:a:24,f28000:y:24,f28500:y:24,f29000:lup:12,f29500:rt:24,f30000:rright:4,f30500:rt:24'
+$captureFlipsTask='28000,28500,29000,29500,30000,30500,31000'
 foreach($armTask in @('barrier','coalesced','lean_barrier')) {
     if(Test-Path (Join-Path $analysisTask "$Name-stop.flag")){throw 'Workflow cancelled.'}
     $probeTask="${Name}_${armTask}"

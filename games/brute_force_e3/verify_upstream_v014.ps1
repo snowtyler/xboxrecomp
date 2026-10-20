@@ -70,7 +70,7 @@ $settingsTask = @{
     RECOMP_GPU_TIMING=$null; RECOMP_HW_GPU_TRACE=$null
     RECOMP_HW_COUNTERS=$(if ($CombatProfile -or $SyncMetrics) {'1'} else {$null})
     RECOMP_HW_CPU_TIMING=$(if ($CombatProfile -or $SyncMetrics) {'1'} else {$null})
-    RECOMP_HW_SYNC_CPU=$(if ($CombatProfile -or $SyncMetrics) {'1'} else {$null})
+    RECOMP_HW_SYNC_CPU=$(if (($CombatProfile -or $SyncMetrics) -and -not $LeanProfile) {'1'} else {$null})
     RECOMP_HW_TEXTURE_HASH=$null; RECOMP_HW_TEXTURE_EPOCH=$null
     RECOMP_NV2A_PFB_POLL=$null
     RECOMP_PERF_WINDOWS=$(if ($CombatProfile) {'500:530,565:585,600:615,620:635'} else {$null})
@@ -139,8 +139,9 @@ try {
         if ($LASTEXITCODE -ne 0) {throw 'Guest death/replay transitions were not proven.'}
     }
     if ($CombatProfile -or $SyncMetrics) {
+        $flipMetricArgsTask=if($FlipScript){@('--flip-windows','28500:29000,29000:29500,29500:30000,30000:30500,30500:31000')}else{@()}
         & python (Join-Path $PSScriptRoot 'analyze_combat_profile.py') (Join-Path $PSScriptRoot "analysis/$Name") `
-            --output (Join-Path $PSScriptRoot "analysis/$Name-combat.json")
+            --output (Join-Path $PSScriptRoot "analysis/$Name-combat.json") @flipMetricArgsTask
         if ($LASTEXITCODE -ne 0) {throw 'Combat profile observations are incomplete.'}
     }
     if ($FlipScript) {

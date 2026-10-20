@@ -11,6 +11,12 @@ The first combat profile keeps release synchronization as the main performance
 lead; see [combat and audio observations](COMBAT_PROFILE_158.md) for the measured
 wait split, replay timing check and remaining qualification limits.
 
+The five coalesced GET pairs are complete. The follow-up
+[sync accounting and rendered comparison](COALESCING_159_QUALIFICATION.md)
+records the shared visual defects, strict input-route failures, readback bytes,
+CPU-clock correction and lean audio/performance evidence. Coalescing remains
+experimental.
+
 This project targets the extracted prototype supplied at
 `D:\Downloads\Brute Force E3 Prototype`. The retail build must use a separate
 project: its function addresses and generated code will differ.

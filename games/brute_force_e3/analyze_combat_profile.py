@@ -25,12 +25,13 @@ def records(text, prefix):
 
 
 WAIT_KEYS = ("completed", "poll_count", "event_count", "poll_wall_ms",
-             "event_wall_ms", "poll_cpu_ms", "event_cpu_ms", "cpu_errors")
+             "event_wall_ms", "cpu_errors")
 
 
 def wait_window(rows, window, zero, exclusions=()):
     previous = {}
     totals = dict.fromkeys(WAIT_KEYS, 0)
+    cycles = dict.fromkeys(("poll_cycles", "event_cycles", "thread_cycles", "thread_cpu_ms"), 0)
     seconds = 0
     tids = set()
     for row in rows:
@@ -48,8 +49,21 @@ def wait_window(rows, window, zero, exclusions=()):
         seconds += end - start
         for key, value in delta.items():
             totals[key] += value
+        for key in cycles:
+            value=row[key]-before[key] if row.get(key) is not None and before.get(key) is not None else None
+            if value is not None and value<0:raise ValueError("SDK cycle/long CPU clock reset")
+            cycles[key]=cycles[key]+value if cycles[key] is not None and value is not None else None
+    totals.update(cycles)
+    totals.update(poll_cpu_ms=None,event_cpu_ms=None) # Legacy short-span thread times are unqualified.
+    shares=None
+    if len(tids)==1 and cycles['thread_cycles']:
+        shares={key.replace('_cycles','_cycle_share'):
+                   cycles[key]/cycles['thread_cycles']
+                   for key in ('poll_cycles','event_cycles') if cycles[key] is not None}
     # Seconds summed across guest threads is not one wall-clock denominator.
     return {"totals": totals, "thread_observation_seconds": seconds,
+            "cpu_cycle_shares": shares,
+            "cpu_limits": "Legacy per-call GetThreadTimes sums are discarded. Scheduled cycles are not converted to elapsed time. Long-window thread CPU remains directly measured.",
             "tids": sorted(tids), "single_thread_wall_fraction":
             ((totals["poll_wall_ms"] + totals["event_wall_ms"]) / (seconds * 1000)
              if seconds and len(tids) == 1 else None)}
@@ -59,8 +73,9 @@ def renderer_window(rows, window, zero, exclusions=()):
     total = {"flips": 0, "draws": 0, "executor_cpu_ms": 0, "release_ms": 0,
              "release_calls": 0, "release_work_calls": 0, "release_work_ms": 0,
              "segments": 0, "segments_with_releases": 0, "color": 0, "depth": 0,
-             "all_sync_ms": 0, "trap_ms": 0}
-    optional = dict.fromkeys(("color_readback_bytes", "depth_readback_bytes", "release_cpu_ms"), 0)
+             "all_sync_ms": 0, "trap_ms": 0, "texture_compare_bytes": 0,
+             "snapshot_compare_bytes": 0, "vertex_upload_bytes": 0}
+    optional = dict.fromkeys(("color_readback_bytes", "depth_readback_bytes", "release_cycles", "executor_cycles"), 0)
     seconds = 0
     for before, after in zip(rows, rows[1:]):
         start, end = before["qpc_ms"] / 1000 - zero, after["qpc_ms"] / 1000 - zero
@@ -70,10 +85,12 @@ def renderer_window(rows, window, zero, exclusions=()):
         if delta is None:
             continue
         seconds += end - start
-        for key in ("flips", "draws", "trap_ms", "segments", "color", "depth"):
+        for key in ("flips", "draws", "trap_ms", "segments", "color", "depth",
+                    "texture_compare_bytes", "snapshot_compare_bytes", "vertex_upload_bytes"):
             total[key] += delta[key]
-        if delta["executor_cpu_ms"] is not None:
-            total["executor_cpu_ms"] += delta["executor_cpu_ms"]
+        cpu = delta["executor_cpu_ms"]
+        total["executor_cpu_ms"] = (total["executor_cpu_ms"] + cpu
+                                    if total["executor_cpu_ms"] is not None and cpu is not None else None)
         total["release_ms"] += delta["sync"]["release"]["ms"]
         total["release_calls"] += delta["sync"]["release"]["calls"]
         total["release_work_calls"] += sum(delta["sync"]["release"]["outcomes"][1:])
@@ -81,13 +98,16 @@ def renderer_window(rows, window, zero, exclusions=()):
         total["release_work_ms"] += work_ms if work_ms is not None else delta["sync"]["release"]["ms"]
         total["segments_with_releases"] += sum(delta["release_histogram"][1:])
         for key in optional:
-            value = delta["sync"]["release"].get("cpu_ms") if key == "release_cpu_ms" else delta.get(key)
+            value = delta["sync"]["release"].get("cpu_cycles") if key == "release_cycles" else delta.get(key)
             optional[key] = optional[key]+value if optional[key] is not None and value is not None else None
         total["all_sync_ms"] += sum(v["ms"] for v in delta["sync"].values())
     total.update(optional)
+    total['release_cpu_ms']=None # Never interpret coarse per-call legacy sums as CPU time.
     calls, work, flips = total["release_calls"], total["release_work_calls"], total["flips"]
     removable = max(0, calls-total["segments_with_releases"])
     return {"seconds": seconds, "totals": total,
+            "release_cycle_share": total['release_cycles']/total['executor_cycles']
+                if total['release_cycles'] is not None and total['executor_cycles'] else None,
             "release_ms_per_call": total["release_ms"]/calls if calls else None,
             "release_ms_per_work_call": total["release_work_ms"]/work if work else None,
             "optimistic_constant_call_cost_saving_ms_per_flip":
@@ -104,6 +124,18 @@ DEVICE_RE = re.compile(r"\[XA2 DEVICE\] qpc=(\d+) qpc_hz=(\d+) played=(\d+) queu
 def device_rows(text):
     return [dict(zip(("qpc", "hz", "played", "queued", "submitted", "staged", "underruns"),
                      map(int, values))) for values in DEVICE_RE.findall(text)]
+
+
+def renderer_flip_window(rows, window):
+    """Whole counter intervals inside an absolute completed-flip range."""
+    selected=[(a,b) for a,b in zip(rows,rows[1:])
+              if window[0]<=a["flips"]<b["flips"]<=window[1]
+              and counter_delta(a,b) is not None]
+    if not selected:
+        return {"requested_flips": window,"status": "insufficient_complete_intervals"}
+    first,last=selected[0][0],selected[-1][1]
+    return {"requested_flips": window,"measured_flips": [first["flips"],last["flips"]],
+            **renderer_window(rows,[first["qpc_ms"]/1000,last["qpc_ms"]/1000],0)}
 
 
 def clock_estimate(rows, minimum_seconds=10):
@@ -151,7 +183,10 @@ def apu_window(rows, window, zero):
     if len(selected)<2:
         return {"status": "insufficient_reports"}
     a,b=selected[0],selected[-1]
-    if a["tid"]!=b["tid"] or b["submitted"]<a["submitted"]:
+    if len({r["tid"] for r in selected})!=1 or any(
+            y["submitted"]<x["submitted"] or
+            (x["cpu_ms"] is not None and y["cpu_ms"] is not None and y["cpu_ms"]<x["cpu_ms"])
+            for x,y in zip(selected,selected[1:])):
         raise ValueError("APU producer identity/counters changed")
     seconds=(b["qpc_ms"]-a["qpc_ms"])/1000
     return {"seconds": seconds, "tid": a["tid"],
@@ -172,7 +207,7 @@ def readback_accounting_errors(rows):
     return errors
 
 
-def analyze(prefix, windows, clock_log=None):
+def analyze(prefix, windows, clock_log=None, flip_windows=()):
     def side(s): return prefix.with_name(prefix.name+s)
     manifest = json.loads(side("-process.json").read_text(encoding="utf-8-sig"))
     zero = manifest["launch_monotonic_seconds"]
@@ -211,24 +246,36 @@ def analyze(prefix, windows, clock_log=None):
     if lean and (sample or manifest["capture_windows"] or config.get("RECOMP_FB_DUMP")
                  or config.get("RECOMP_AUDIO_WAV")):
         errors.append("lean profile contains sampling, captures or WAV output")
+    if lean and any(prefix.parent.glob(prefix.name+'*.bmp')):
+        errors.append("lean profile unexpectedly wrote surface images")
     if config.get("RECOMP_AUDIO_DEVICE_TRACE") == "1" and len(device)<2:
         errors.append("requested device timing missing")
     if config.get("RECOMP_AUDIO_CPU_TRACE") == "1" and (len(apu)<2 or any(r["cpu_ms"] is None for r in apu)):
         errors.append("requested APU thread CPU timing missing")
     if config.get("RECOMP_HW_SYNC_CPU") == "1" and any(
-            reason.get("cpu_ms") is None or reason.get("cpu_errors") for row in renderer for reason in row["sync"].values()):
+            (reason.get("cpu_ms") is None and reason.get("cpu_cycles") is None) or reason.get("cpu_errors")
+            for row in renderer for reason in row["sync"].values()):
         errors.append("requested sync CPU timing missing or failed")
+    warnings=[]
+    if any(r.get('poll_cpu_ms') is not None for r in waits) or any(
+            r.get('cpu_ms') is not None for row in renderer for r in row['sync'].values()):
+        warnings.append('Discarded legacy short-span GetThreadTimes sums: clock granularity can overcount phase CPU time. Wall/count/byte and long-window thread CPU measurements are retained.')
+    window_results=[{"requested": window,
+                     "wait": wait_window(waits, window, zero, exclusions),
+                     "renderer": renderer_window(renderer, window, zero, exclusions),
+                     "apu": apu_window(apu, window, zero),
+                     "audio": audio_window(device, window, zero,
+                                           clock["estimated_samples_per_second"] or 48000)}
+                    for window in windows]
+    if not any(w["renderer"]["totals"]["flips"] for w in window_results):
+        errors.append("no complete flip intervals in requested measurement windows")
     return {"executable_sha256": manifest["executable_sha256"],
             "profile_observations_valid": not errors, "errors": errors,
+            "warnings": warnings,
             "guest_wait_thread_ids": sorted({r["tid"] for r in waits}),
             "cpu_sample": sample,
-            "windows": [{"requested": window,
-                         "wait": wait_window(waits, window, zero, exclusions),
-                         "renderer": renderer_window(renderer, window, zero, exclusions),
-                         "apu": apu_window(apu, window, zero),
-                         "audio": audio_window(device, window, zero,
-                                               clock["estimated_samples_per_second"] or 48000)}
-                        for window in windows],
+            "windows": window_results,
+            "flip_windows": [renderer_flip_window(renderer,window) for window in flip_windows],
             "device_clock": clock,
             "gameplay_only_clock": gameplay_clock,
             "audio_long_windows": [{"requested": [n, n+60],
@@ -240,7 +287,7 @@ def analyze(prefix, windows, clock_log=None):
             "wait_reports": len(waits),
             "limits": ["Diagnostic build; captures must confirm combat before interpreting its windows.",
                        "Poll and event times are guest-thread stages. Executor sync wall time overlaps them and must not be added to them.",
-                       "CPU times use GetThreadTimes resolution. Completed waits only; an active wait at a window boundary can shift attribution.",
+                       "Short-span CPU attribution uses scheduled cycles only. Long thread CPU uses GetThreadTimes; legacy per-call sums are discarded. Completed waits only; boundary waits can shift attribution.",
                        "GPU timing queries and ordered tracing are off; CPU timing, monitor, WAV and sampling add diagnostic overhead."]}
 
 
@@ -250,7 +297,8 @@ if __name__ == "__main__":
     parser.add_argument("--windows", default="500:530,565:585,600:615,620:635")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--clock-log", type=Path)
+    parser.add_argument("--flip-windows", default="")
     args = parser.parse_args()
-    result = analyze(args.prefix, ranges(args.windows), args.clock_log)
+    result = analyze(args.prefix, ranges(args.windows), args.clock_log, ranges(args.flip_windows))
     args.output.write_text(json.dumps(result, indent=2)+"\n")
     raise SystemExit(0 if result["profile_observations_valid"] else 1)

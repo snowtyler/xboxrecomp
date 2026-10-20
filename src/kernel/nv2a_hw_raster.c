@@ -169,6 +169,8 @@ void nv2a_hw_perf_report(void)
     perf.last_report_ms=now;
     QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&clock);
     int cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user);
+    ULONG64 executor_cycles=0;
+    int cycles_valid=QueryThreadCycleTime(GetCurrentThread(),&executor_cycles);
     k.LowPart=kernel.dwLowDateTime;k.HighPart=kernel.dwHighDateTime;
     u.LowPart=user.dwLowDateTime;u.HighPart=user.dwHighDateTime;
     double ms=1000.0/frequency.QuadPart;
@@ -177,6 +179,8 @@ void nv2a_hw_perf_report(void)
     fprintf(stderr,"[HW COUNTERS] {\"version\":1,\"report\":%llu,\"qpc_ms\":%.3f,\"thread_id\":%lu,\"executor_cpu_ms\":",
         (unsigned long long)++perf.report_id,clock.QuadPart*ms,GetCurrentThreadId());
     if(cpu_valid)fprintf(stderr,"%.3f",(k.QuadPart+u.QuadPart)/10000.0);else fputs("null",stderr);
+    fputs(",\"executor_cycles\":",stderr);
+    if(cycles_valid)fprintf(stderr,"%llu",(unsigned long long)executor_cycles);else fputs("null",stderr);
     fprintf(stderr,",\"draws\":%llu,\"segments\":%llu,\"color\":%llu,\"depth\":%llu,\"fences\":%llu,\"trap_ms\":%.3f,\"texture_compare_bytes\":%llu,\"snapshot_compare_bytes\":%llu,\"vertex_upload_bytes\":%llu",
         (unsigned long long)g.draws,(unsigned long long)perf.segments,
         (unsigned long long)perf.color,(unsigned long long)perf.depth,(unsigned long long)perf.fences,
@@ -195,7 +199,9 @@ void nv2a_hw_perf_report(void)
         fprintf(stderr,"],\"work_ms\":%.3f,\"color_readbacks\":%llu,\"depth_readbacks\":%llu,\"readback_bytes\":%llu,\"cpu_ms\":",
             perf.sync[i].work_ticks*ms,(unsigned long long)perf.sync[i].color,
             (unsigned long long)perf.sync[i].depth,(unsigned long long)perf.sync[i].readback_bytes);
-        if(perf_sync_cpu_enabled())fprintf(stderr,"%.3f",perf.sync[i].cpu_ticks/10000.0);
+        /* Coarse thread-time deltas cannot be summed over short calls. */
+        fputs("null,\"cpu_cycles\":",stderr);
+        if(perf_sync_cpu_enabled())fprintf(stderr,"%llu",(unsigned long long)perf.sync[i].cpu_ticks);
         else fputs("null",stderr);
         fprintf(stderr,",\"cpu_errors\":%llu}",(unsigned long long)perf.sync[i].cpu_errors);
     }
@@ -572,25 +578,19 @@ int nv2a_hw_sync_reason(Nv2aSyncReason reason,int read_managed_depth)
     }
     if((unsigned)reason>=NV2A_SYNC_REASON_COUNT)reason=NV2A_SYNC_CPU;
     LARGE_INTEGER began,ended;QueryPerformanceCounter(&began);
-    /* Detailed CPU attribution is opt-in: two thread-clock queries per sync,
-     * outside normal execution. Use long windows because this clock is coarse. */
+    /* Scheduled cycles exclude descheduling. Do not convert them to elapsed
+     * time: the hardware timer's frequency behavior is CPU-dependent. */
     int cpu_on=perf_sync_cpu_enabled();
-    FILETIME created,exited,kernel,user;uint64_t cpu_before=0,cpu_after=0;
+    ULONG64 cpu_before=0,cpu_after=0;
     int cpu_valid=1;
-    if(cpu_on) {
-        cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user);
-        if(cpu_valid)cpu_before=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
-                                 (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
-    }
+    if(cpu_on)cpu_valid=QueryThreadCycleTime(GetCurrentThread(),&cpu_before);
     uint64_t color=perf.color,depth=perf.depth,fences=perf.fences;
     uint64_t bytes=perf.color_readback_bytes+perf.depth_readback_bytes;
     int result=synchronize(read_managed_depth);
     if(!result)check_device_removed("synchronization");
     QueryPerformanceCounter(&ended);
     if(cpu_on) {
-        cpu_valid=GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user)&&cpu_valid;
-        if(cpu_valid)cpu_after=(((uint64_t)kernel.dwHighDateTime<<32)|kernel.dwLowDateTime)+
-                                (((uint64_t)user.dwHighDateTime<<32)|user.dwLowDateTime);
+        cpu_valid=QueryThreadCycleTime(GetCurrentThread(),&cpu_after)&&cpu_valid;
         if(cpu_valid&&cpu_after>=cpu_before)perf.sync[reason].cpu_ticks+=cpu_after-cpu_before;
         else ++perf.sync[reason].cpu_errors;
     }

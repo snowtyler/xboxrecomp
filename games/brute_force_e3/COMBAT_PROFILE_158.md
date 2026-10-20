@@ -34,6 +34,14 @@ coalescing comparison.
 
 ## Wait and executor attribution
 
+Correction from the candidate159 sanity check: the short-phase CPU values
+originally summed from `GetThreadTimes` are withdrawn. Its coarse accounting
+can overcount repeated sub-millisecond phases; one sync window even exceeded
+its wall time. Wall times/counts and the long-window executor/main-thread CPU
+measurements remain valid. Candidate160 uses scheduled cycle counts for short
+phases, without converting cycles to elapsed time. See
+[Microsoft's cycle-counter guidance](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-querythreadcycletime).
+
 The new opt-in `RECOMP_BRUTE_FORCE_WAIT_PROFILE=1` records per-thread cumulative
 QPC wall time and `GetThreadTimes` CPU time at poll/event entry and wait return.
 There is no hook inside a busy-loop iteration and no ordered-trace traffic.
@@ -51,8 +59,8 @@ For 500–530 s, whole QPC report intervals measured:
 | All sync reasons | 19.740 s / 45.69 ms per flip |
 | Executor CPU | 26.563 s / 61.49 ms per flip |
 | Guest wait observation interval | 26.370 s |
-| Event stage | 388 waits / 24.142 s wall / 0.313 s CPU |
-| Poll stage | 0 waits / 0 wall / 0 CPU |
+| Event stage | 388 waits / 24.142 s wall; short-phase CPU withdrawn |
+| Poll stage | 0 waits / 0 wall |
 
 Guest wait and executor synchronization overlap on different threads. Never add
 their wall times. Event wall time occupies about 91.6% of the guest observation
@@ -72,9 +80,9 @@ bulk captures. Periodic surface dumps and other diagnostic overhead remain;
 these are not clean production performance measurements.
 
 Across the entire run, the final completed-wait report has 12.881 s poll wall
-and 9.641 s poll CPU, versus 272.816 s event wall and 7.578 s event CPU. The poll
-cost is real outside the representative combat window, so retain this split in
-future profiles, especially coalesced runs where publication timing can change it.
+and 272.816 s event wall. Stored short-phase CPU sums are not interpreted.
+Retain the poll/event wall split in future profiles, especially coalesced runs
+where publication timing can change it.
 
 ## Replay gap
 

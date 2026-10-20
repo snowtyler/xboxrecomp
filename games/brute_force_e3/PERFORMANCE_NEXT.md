@@ -15,6 +15,19 @@ default/rollback probes and the qualification boundary.
 
 Next independent work:
 
+October 19 follow-up: the five coalesced GET pairs passed in all progress arms;
+two controls reproduced the direct lost wakeup. Both rendered arms passed GET
+monitoring but failed strict menu-input receipts by one flip. Reviewed gameplay
+pairs show shared visual defects and no sampled coalescing-only corruption;
+the final ammunition mismatch limits scene equality. See
+`COALESCING_159_QUALIFICATION.md` for actual bytes, replacement-sync costs and
+the withdrawn short-span CPU measurements. Full coalescing gates remain open.
+The dump/sampler/WAV-free 640-second retry passed GET monitoring. Its audio
+production remains near 42.1k frames/s across widely different gameplay flip
+rates, with low producer CPU; investigate pacing/scheduling separately. It
+retains expensive synchronization under concurrent GPU load, so target
+residency and actual CPU-consumer observation remain next performance work.
+
 The first combat profile is complete; see `COMBAT_PROFILE_158.md`. Its valid
 500–530 s gameplay window attributes 38.38 of 66.09 ms/flip to release sync,
 with no poll waits. The firing-time CPU sample is mostly event-waiting on the
@@ -224,6 +237,17 @@ continue observe-mode work rather than blocking every other optimization.
 
 ## 3. Retain native target content and measure CPU refinements
 
+This and the access observer in section 4 are the next performance work
+regardless of the coalescing verdict. The combat profile separates two levers:
+coalescing reduces the number of syncs, while residency and selective CPU
+acquisition reduce the cost of each retained sync. Measure both explicitly.
+Candidate159 adds logical color/depth readback bytes and per-reason work-call,
+wall/CPU and byte attribution. The lean route removes every surface-dump flag,
+CPU sampling and WAV I/O; monitoring and query-free diagnostic counters remain.
+Use the same-window sync count and bytes per flip, distinguish no-op calls,
+and label mean-cost coalescing savings as a model rather than a guarantee.
+Forced drains and target-size changes can defeat that model.
+
 Design a bounded cache of target *content*, keyed by canonical backing and full
 layout. Existing dimension pooling reuses storage only. Track content generation
 and dirty state separately, preserve CPU dependencies and flush every relevant
@@ -247,6 +271,13 @@ new gameplay profile shows material clear/upload cost. Existing clear sync was
 small in the earlier diagnostic, so it is not the main bet for 60 FPS.
 
 ## 4. Build color-access observation before residency
+
+Do not confuse allocation pooling with retained GPU content. The current
+input-acquisition check covers the current dirty color/depth targets, while
+target replacement first forces coherence. Keeping multiple dirty targets
+resident will require acquisition across all retained backings and aliases,
+not just the current pair. Observing few renderer-mediated acquisitions is
+not proof that arbitrary guest CPU reads or host I/O do not consume a target.
 
 Start with an opt-in observer retaining eager readback and existing publication.
 Measure, by target/phase, which GPU output epochs are followed by a real

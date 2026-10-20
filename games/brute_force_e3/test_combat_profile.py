@@ -1,6 +1,6 @@
 import unittest
 
-from analyze_combat_profile import audio_window, apu_window, clock_estimate, readback_accounting_errors, renderer_window, wait_window
+from analyze_combat_profile import audio_window, apu_window, clock_estimate, readback_accounting_errors, renderer_flip_window, renderer_window, wait_window
 from test_performance import report
 
 
@@ -19,6 +19,20 @@ def audio(t, rate=48000, underruns=0, queued=2):
 
 
 class CombatProfileTests(unittest.TestCase):
+    def test_missing_executor_clock_remains_unknown(self):
+        rows=[report(1),report(2)]
+        rows[-1]['executor_cpu_ms']=None
+        result=renderer_window(rows,[2,4],0)
+        self.assertIsNone(result['totals']['executor_cpu_ms'])
+        self.assertIsNone(result['per_flip']['executor_cpu_ms'])
+
+    def test_sync_cost_uses_only_complete_flip_intervals(self):
+        rows=[report(i) for i in range(1,4)]
+        for i,row in enumerate(rows):row['flips']=100+i*10
+        result=renderer_flip_window(rows,[105,120])
+        self.assertEqual(result['measured_flips'],[110,120])
+        self.assertEqual(result['totals']['flips'],10)
+        self.assertEqual(renderer_flip_window(rows,[105,115])['status'],'insufficient_complete_intervals')
     def test_byte_volume_is_attributed_and_legacy_is_unknown(self):
         self.assertEqual(readback_accounting_errors([report(1)]),[])
         row=report(1)
@@ -50,9 +64,20 @@ class CombatProfileTests(unittest.TestCase):
         result = wait_window([wait(10), wait(20, completed=5, poll_count=3,
                              event_count=2, poll_wall_ms=3000, poll_cpu_ms=500,
                              event_wall_ms=4000, event_cpu_ms=10)], [10, 20], 0)
-        self.assertEqual(result["totals"]["poll_cpu_ms"], 500)
+        self.assertIsNone(result["totals"]["poll_cpu_ms"])
         self.assertEqual(result["totals"]["event_wall_ms"], 4000)
         self.assertAlmostEqual(result["single_thread_wall_fraction"], .7)
+
+    def test_short_cpu_sums_are_discarded_and_cycle_share_is_explicit(self):
+        rows=[wait(10, poll_cpu_ms=0, poll_cycles=10, event_cycles=20,
+                   thread_cycles=100, thread_cpu_ms=100),
+              wait(20, poll_cpu_ms=50000, poll_cycles=2010, event_cycles=1020,
+                   thread_cycles=4100, thread_cpu_ms=1300)]
+        result=wait_window(rows,[10,20],0)
+        self.assertIsNone(result['totals']['poll_cpu_ms'])
+        self.assertEqual(result['totals']['poll_cycles'],2000)
+        self.assertEqual(result['cpu_cycle_shares']['poll_cycle_share'],.5)
+        self.assertEqual(result['cpu_cycle_shares']['event_cycle_share'],.25)
 
     def test_sampling_exclusion_and_thread_denominator(self):
         rows = [wait(10), wait(10, tid=2), wait(20, completed=1),

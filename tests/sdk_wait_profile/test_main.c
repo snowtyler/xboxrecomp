@@ -19,9 +19,11 @@ static BOOL cpu_now(HANDLE h,FILETIME *a,FILETIME *b,FILETIME *k,FILETIME *u)
     u->dwHighDateTime=(DWORD)(cpu>>32);u->dwLowDateTime=(DWORD)cpu;
     return cpu_valid;
 }
+static BOOL cycles_now(HANDLE h,PULONG64 result){(void)h;*result=cpu;return cpu_valid;}
 #define QueryPerformanceCounter clock_now
 #define QueryPerformanceFrequency clock_hz
 #define GetThreadTimes cpu_now
+#define QueryThreadCycleTime cycles_now
 #include "../../games/brute_force_e3/src/recomp_get_trace.c"
 void nv2a_order_trace(uint32_t e,uint32_t a,uint32_t b,uint32_t c,uint32_t d)
 {(void)e;(void)a;(void)b;(void)c;(void)d;}
