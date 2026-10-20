@@ -1,5 +1,13 @@
 # Next performance work: stable 60 FPS
 
+Standard-profiler follow-up: [WPR/WPA and RenderDoc](PROFILE_WPR_RENDERDOC.md)
+records the combat ETL, sampled/precise wait stacks and a 1,161-draw frame with
+16.85 ms summed GPU replay time. The executor mostly runs; guest graphics waits
+are readied through timer/DPC dispatch. Target residency/CPU-consumer observation
+is the recommended next track. NVIDIA live utilization remains unattributed in
+the installed WPA/GPUView views, and tracing overhead is material; no FPS claim
+or policy change follows from these diagnostics.
+
 Planning baseline: October 14, 2026. This is a proposed sequence, not enabled
 behavior or a promised speedup. Candidate149 and its existing evidence remain
 frozen; the corrected launcher has not changed the executable.
