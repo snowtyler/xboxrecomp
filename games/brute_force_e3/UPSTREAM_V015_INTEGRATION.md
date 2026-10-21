@@ -140,7 +140,26 @@ also pass. Launcher regression waits until the baseline probe releases its lock.
 
 ## 6. APU
 
-Pending.
+Confirmed `voice_get_samples` used fixed two-block ADPCM buffers while accepting
+the descriptor's wider samples-per-block value. Ported `b380f02`: buffers hold
+up to 18 blocks and wider values return before copying/decoding. Ported
+`70afb54`: each bin ramps from its previous frame's gain to the target across
+32 samples; new-voice/reset clears gain history. HRTF remains unchanged.
+Master mute, stale-PCM guard and non-consuming inspection are retained.
+
+The new voice fixture tests mono/stereo wide ADPCM, refuses values above the
+buffer limit and checks every sample of a gain transition. It passes with the
+rest of the 87-test native suite. This is not an audio-rate measurement or a
+claim to resolve the 88% production shortfall.
+
+**Per-voice locks deferred.** The retained WPR precise export
+`wpr162-target-waits-export/CPU_Usage_(Precise)_By_Process.csv` covers executor
+and main guest waits, not the APU producer/DirectSound lock path. It cannot
+establish or reject contention there. Source confirms `voice_lock` takes
+`d->lock` and the producer holds it while mixing; that is a lead, not measured
+blocked time. `8627159` also changes protection for FE list/voice mutation
+relative to the mixer; it is not treated as a low-risk unconditional port.
+Obtain a targeted precise-wait export before changing that synchronization.
 
 ## 7. Profiling collector
 
