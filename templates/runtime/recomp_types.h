@@ -922,10 +922,11 @@ static inline int recomp_parity8(uint32_t x) {
 }
 #define RECOMP_PARITY8(x) recomp_parity8((uint32_t)(x))
 
-/** Pop a 32-bit value from the simulated stack. */
+/** Read using old ESP, increment, then assign: POP ESP ends at the popped value. */
 #define POP32(sp, dst) do { \
-    (dst) = MEM32(sp); \
+    uint32_t _pv = MEM32(sp); \
     (sp) += 4; \
+    (dst) = _pv; \
 } while(0)
 
 /* ================================================================

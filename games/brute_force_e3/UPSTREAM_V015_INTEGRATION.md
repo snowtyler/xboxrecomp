@@ -26,12 +26,20 @@ NtUserIoApcDispatcher and synchronize callbacks. It clobbers registers and
 exercises both stdcall and defensive cdecl return behavior, then executes a
 caller POP ESI against a stack canary. The DPC shares the tested save/restore
 helper; asynchronous dispatch policy is unchanged. MSVC RelWithDebInfo native fixture: zero failures (six callback cases,
-including the real file-APC path); logs in ignored nalysis/v015-kernel-*.
+including the real file-APC path); logs in ignored `analysis/v015-kernel-*`.
 The final fresh-candidate gameplay/death/replay gate is still pending.
 
 ## 2. POP ESP
 
-Pending.
+Confirmed the old macro assigns ESP before incrementing it. Ported `54b64ca`:
+read into a temporary, increment the old stack pointer, then assign destination.
+The current generated tree contains one `POP32(esp, esp)` in `recomp_0082.c`.
+Regeneration matters for the copied runtime header; the emitted instruction
+statement itself does not change. Refreshed that ignored header now and will
+regenerate separately in item 3. Added upstream stack-operand fixture and a
+lifter assertion. MSVC stack fixture passes push/pop ESP, the round-to-integer
+idiom, ordinary POP, memory stack operands, LEAVE and PUSHAD/POPAD. The focused
+lifter test passes.
 
 ## 3. Lifter applicability and regeneration
 
