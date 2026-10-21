@@ -106,7 +106,37 @@ Pending: measure the retained implementation before considering paced vblank.
 
 ## 5. Rendering leads
 
-Pending. Rendering changes remain opt-in diagnostic behavior.
+Confirmed unclamped oD0/oD1 in the CPU vertex interpreter and the D3D11 vertex
+wrapper. Pixel-stage saturation occurs after interpolation and cannot substitute
+for vertex-output saturation. `RECOMP_NV2A_COLOR_CLAMP=1` now independently
+clamps both colours at the CPU output and both transformed/raw hardware vertex
+boundaries, before interpolation. It is off when unset, empty or `0`; the HLSL
+compile-time constant folds out the disabled branch. This is a diagnostic, not
+a promoted rendering fix. Gameplay foliage comparison: pending fresh candidate.
+
+`RECOMP_NV2A_V015_RENDER=1` independently opts into the other missing semantics:
+CPU and D3D11 MIRROR/BORDER addressing (including border-source selection and
+SET_TEXTURE_BORDER_COLOR), reading the last SET_VERTEX_DATA* value for size-zero
+attributes in both hardware packing and CPU vertex input, and SET_FOG_PLANE /
+SET_EYE_POSITION writes to shared constants c[57]/c[56]. The sampler cache keys
+the full descriptor including border colour and retains per-draw references
+across cache eviction. Ordinary launch clears both diagnostic flags.
+
+Near-plane clipping is already present in our `nv2a_clip.h` and hardware D3D11
+clip volume. The CPU path reconstructs from window bounds/depth range, not
+shader c[58]/c[59] viewport constants; no `8f84d41` CPU-raster replacement is
+needed. Existing clipping tests remain unchanged. Corrected the survey table:
+0x1808 ARRAY_ELEMENT32, 0x1818 INLINE_ARRAY. Walker/publication logic is untouched.
+
+New native GPU tests pass with flags `0` and `1`: interpolated colour differs
+as expected before/after clamp on transformed and raw vertex paths, CPU oD0/oD1
+negative/high lanes clamp only when opted in, mirror chooses the correct texel,
+and changing border colour changes output (cache-key coverage). Two native
+method tests verify c[56]/c[57] via the real method dispatcher. Two compiler-backed
+tests use the actual private fetch/coordinate function bodies to check all 16
+current attributes, zero-stride declared arrays, negative mirror and wrap.
+All 87 native tests passed before adding the two constant-method checks, which
+also pass. Launcher regression waits until the baseline probe releases its lock.
 
 ## 6. APU
 

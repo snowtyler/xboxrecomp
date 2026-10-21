@@ -40,3 +40,15 @@ target_include_directories(nv2a-gpu-vertex-test PRIVATE ../../src/kernel)
 target_link_libraries(nv2a-gpu-vertex-test PRIVATE d3d11 dxgi dxguid d3dcompiler)
 target_compile_options(nv2a-gpu-vertex-test PRIVATE /UNDEBUG)
 add_test(NAME nv2a-hardware-vertex-equivalence COMMAND nv2a-gpu-vertex-test)
+add_executable(nv2a-diagnostic-render-test diagnostic_render_test.c
+    ../../src/kernel/nv2a_hw_raster.c ../../src/kernel/nv2a_combiner.c
+    ../../src/kernel/nv2a_combiner_hlsl.c ../../src/kernel/nv2a_vsh_hlsl.c
+    ../../src/kernel/nv2a_vsh_interp.c)
+target_include_directories(nv2a-diagnostic-render-test PRIVATE ../../src/kernel)
+target_link_libraries(nv2a-diagnostic-render-test PRIVATE d3d11 dxgi dxguid d3dcompiler)
+target_compile_options(nv2a-diagnostic-render-test PRIVATE /UNDEBUG)
+foreach(mode RANGE 0 1)
+    add_test(NAME nv2a-v015-render-${mode} COMMAND nv2a-diagnostic-render-test)
+    set_tests_properties(nv2a-v015-render-${mode} PROPERTIES ENVIRONMENT
+        "RECOMP_NV2A_COLOR_CLAMP=${mode};RECOMP_NV2A_V015_RENDER=${mode}")
+endforeach()

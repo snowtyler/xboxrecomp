@@ -28,6 +28,7 @@
  * the runtime's screen-space epilogue (RCC of R12.w, then a MAD into oPos).
  */
 #include "nv2a_vsh_interp.h"
+#include "nv2a_render_diagnostics.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -419,6 +420,13 @@ int nv2a_vsh_run(const float in[NV2A_VSH_INPUTS][4], Nv2aVshOutput *out)
             memcpy(out->pos, opos.v, sizeof out->pos);
             memcpy(out->d0, outregs[3], sizeof out->d0);
             memcpy(out->d1, outregs[4], sizeof out->d1);
+            if (nv2a_color_clamp_enabled()) {
+                for (unsigned k = 0; k < 4; ++k) {
+                    float a = out->d0[k], b = out->d1[k];
+                    out->d0[k] = a > 1 ? 1 : (a >= 0 ? a : 0);
+                    out->d1[k] = b > 1 ? 1 : (b >= 0 ? b : 0);
+                }
+            }
             memcpy(out->fog, outregs[5], sizeof out->fog);
             memcpy(out->tex[0], outregs[9], sizeof out->tex[0]);
             memcpy(out->tex[1], outregs[10], sizeof out->tex[1]);

@@ -20,6 +20,7 @@ typedef struct {
     /* Decoder row pitch, including linear formats outside the direct BGRA
      * path. Zero retains compatibility with callers without a pitched source. */
     uint32_t source_pitch;
+    uint32_t addr_w, border, border_color;
 } Nv2aHwTexture;
 typedef struct {
     uint32_t surface, zeta, width, height, pitch, bpp;

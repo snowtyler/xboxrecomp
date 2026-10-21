@@ -31,6 +31,7 @@
 #include <string.h>
 #include <time.h>
 #include "kernel.h"   /* XBOX_CONTIG_BASE / XBOX_CONTIG_SIZE */
+#include "nv2a_render_diagnostics.h"
 #include "xbox_memory_layout.h"   /* xbox_Nv2aFrameCounterFlip */
 #include "nv2a_order_trace.h"
 #include "nv2a_flip_capture.h"
@@ -274,6 +275,7 @@ typedef struct {
     uint32_t pitch;                     /* bytes per row, from CONTROL1  */
     uint32_t color;                     /* NV097 colour-format code      */
     uint32_t addr_u, addr_v;            /* wrap mode per axis            */
+    uint32_t addr_w, border, border_color;
     uint32_t palette;                   /* guest address of the CLUT, P8 */
     uint32_t levels;                    /* mip levels, from FORMAT       */
     uint32_t filter;                    /* SET_TEXTURE_FILTER            */
@@ -539,8 +541,16 @@ static int fetch_attr(const VertexAttr *a, uint32_t index, float out[4])
 
     out[0] = out[1] = out[2] = 0.0f;
     out[3] = 1.0f;
-    if (!a->size || !a->stride)
+    if (!a->size || !a->stride) {
+        if (!a->size && nv2a_v015_render_enabled()) {
+            ptrdiff_t slot = a - s_gpu.attr;
+            if (slot >= 0 && slot < NV_VERTEX_ATTRS) {
+                memcpy(out, s_gpu.imm_attr[slot], 4 * sizeof(float));
+                return 1;
+            }
+        }
         return 0;
+    }
     if (s_gpu.inline_active) {
         /* The batch arrived as INLINE_ARRAY, so `offset` is a byte offset into
          * the buffered payload rather than a guest address -- and 0 is a legal
@@ -926,6 +936,11 @@ static uint32_t wrap_coord(uint32_t c, uint32_t size, uint32_t mode)
         return 0;
     if (mode == 1)                         /* wrap */
         return (uint32_t)(((sc % n) + n) % n);
+    if (mode == 2 && nv2a_v015_render_enabled()) {
+        int64_t period = (int64_t)n * 2;
+        int64_t mirrored = ((int64_t)sc % period + period) % period;
+        return (uint32_t)(mirrored < n ? mirrored : period - 1 - mirrored);
+    }
     return sc < 0 ? 0u : (sc >= n ? size - 1 : c);   /* clamp, and the rest */
 }
 
@@ -966,6 +981,12 @@ static int sample_tex(const Texture *t, uint32_t face_offset,
 
     if (!t->valid)
         return 0;
+    if (nv2a_v015_render_enabled() && t->border_color &&
+        ((t->addr_u == 4 && ((int32_t)u < 0 || u >= t->width)) ||
+         (t->addr_v == 4 && ((int32_t)v < 0 || v >= t->height)))) {
+        *argb = t->border;
+        return 1;
+    }
     u = wrap_coord(u, t->width,  t->addr_u);
     v = wrap_coord(v, t->height, t->addr_v);
 
@@ -2281,6 +2302,7 @@ static int hardware_batch(uint32_t count,const Nv2aVshSnapshot *program)
     for(i=0;i<4;i++)if(s_gpu.texs[i].valid&&nv2a_hw_texture_used(&state,i)){
         Texture *t=&s_gpu.texs[i];Nv2aHwTexture *out=&state.textures[i];
         out->width=t->width;out->height=t->height;out->cube=t->cube;out->linear=!tex_size_from_format(t->color);out->filter=t->filter;out->addr_u=t->addr_u;out->addr_v=t->addr_v;out->format=t->color;
+        out->addr_w=t->addr_w;out->border=t->border;out->border_color=t->border_color;
         out->raw=(const uint8_t*)xbox_GetMemoryOffset()+t->offset;out->raw_bytes=(size_t)tex_face_stride(t)*(t->cube?6:1);out->opaque=t;out->sample=hw_sample;
         out->levels=tex_size_from_format(t->color)?t->levels:1;
         /* Only this linear format is already byte-identical to sampled BGRA.
@@ -3055,6 +3077,7 @@ static void tex_stage_method(uint32_t method, uint32_t param)
     case NV097_SET_TEXTURE_FORMAT:
         t->color = (param >> 8) & 0xFF;
         t->cube = (param >> 2) & 1;
+        t->border_color = (param >> 3) & 1;
         t->levels = (param >> 16) & 0xF;
         /* A swizzled texture carries its own dimensions here, as log2 in
          * BASE_SIZE_U/V. It has to: IMAGE_RECT describes a linear image, and
@@ -3073,6 +3096,7 @@ static void tex_stage_method(uint32_t method, uint32_t param)
          * fall back to clamp, wrong at an edge rather than everywhere. */
         t->addr_u =  param        & 0xF;
         t->addr_v = (param >>  8) & 0xF;
+        t->addr_w = (param >> 16) & 0xF;
         break;
     case NV097_SET_TEXTURE_CONTROL1:
         t->pitch = param >> 16;          /* linear formats only */
@@ -3083,6 +3107,9 @@ static void tex_stage_method(uint32_t method, uint32_t param)
         break;
     case 0x1B14:                                  /* SET_TEXTURE_FILTER */
         t->filter = param;
+        break;
+    case 0x1B24:                                  /* SET_TEXTURE_BORDER_COLOR */
+        t->border = param;
         break;
     default:
         break;
@@ -3572,6 +3599,14 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         }
         if (method >= 0x0AF0 && method < 0x0B00) {
             nv2a_vsh_constant_component(58, (method - 0x0AF0) / 4, param);
+            break;
+        }
+        if (nv2a_v015_render_enabled() && method >= 0x09D0 && method < 0x09E0) {
+            nv2a_vsh_constant_component(57, (method - 0x09D0) / 4, param);
+            break;
+        }
+        if (nv2a_v015_render_enabled() && method >= 0x0A50 && method < 0x0A60) {
+            nv2a_vsh_constant_component(56, (method - 0x0A50) / 4, param);
             break;
         }
         if (method >= 0x0B00 && method < 0x0B80) {    /* TRANSFORM_PROGRAM(i) */

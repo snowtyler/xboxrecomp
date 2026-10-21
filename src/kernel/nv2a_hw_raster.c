@@ -1,4 +1,5 @@
 #include "nv2a_hw_raster.h"
+#include "nv2a_render_diagnostics.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -69,6 +70,8 @@ static struct {
     int texture_hash,texture_epoch,acquire_inputs;
     struct {uint32_t count,words[NV2A_VSH_SLOTS][4];ID3D11VertexShader *vs;ID3D11InputLayout *layout;} vertex_shaders[CACHE_SIZE];
     ID3D11SamplerState *samplers[64];
+    struct { D3D11_SAMPLER_DESC desc; ID3D11SamplerState *object; } diagnostic_samplers[64];
+    unsigned diagnostic_sampler_next;
     ID3D11DepthStencilState *depth_states[16];
     struct { D3D11_BLEND_DESC desc; ID3D11BlendState *object; } blends[64];
     uint64_t draws,syncs,uploads,direct_uploads;
@@ -239,7 +242,8 @@ void nv2a_hw_test_device_loss(void)
 static ID3DBlob *compile(const char *code, const char *profile)
 {
     ID3DBlob *blob=NULL,*errors=NULL;
-    HRESULT hr=D3DCompile(code,strlen(code),"nv2a_hw",NULL,NULL,"main",profile,D3DCOMPILE_IEEE_STRICTNESS,0,&blob,&errors);
+    D3D_SHADER_MACRO macros[]={{"NV_COLOR_CLAMP",nv2a_color_clamp_enabled()?"1":"0"},{NULL,NULL}};
+    HRESULT hr=D3DCompile(code,strlen(code),"nv2a_hw",macros,NULL,"main",profile,D3DCOMPILE_IEEE_STRICTNESS,0,&blob,&errors);
     if(FAILED(hr)) fprintf(stderr,"[HW GPU] shader failed %08lX: %s\n",hr,errors?(char*)ID3D10Blob_GetBufferPointer(errors):"");
     RELEASE(errors,ID3D10Blob); return blob;
 }
@@ -254,7 +258,7 @@ static int init(void)
         "struct V{float4 p:POSITION;float4 d0:COLOR0;float4 d1:COLOR1;float4 f:FOG;float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;};"
         "struct O{float4 p:SV_POSITION;noperspective float4 d0:COLOR0;noperspective float4 d1:COLOR1;noperspective float f:FOG;float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;};"
         "O main(V v){O o;o.p=float4((v.p.x/window.x*2-1)*v.p.w,(1-v.p.y/window.y*2)*v.p.w,v.p.z/window.z*v.p.w,v.p.w);"
-        "o.d0=v.d0;o.d1=v.d1;o.f=v.f.x;o.t0=v.t0;o.t1=v.t1;o.t2=v.t2;o.t3=v.t3;return o;}","vs_5_0");
+        "o.d0=NV_COLOR_CLAMP?saturate(v.d0):v.d0;o.d1=NV_COLOR_CLAMP?saturate(v.d1):v.d1;o.f=v.f.x;o.t0=v.t0;o.t1=v.t1;o.t2=v.t2;o.t3=v.t3;return o;}","vs_5_0");
     if(!blob) {g.failed=1;return 0;}
     hr=ID3D11Device_CreateVertexShader(g.device,ID3D10Blob_GetBufferPointer(blob),ID3D10Blob_GetBufferSize(blob),NULL,&g.vs);
     D3D11_INPUT_ELEMENT_DESC elements[8]={
@@ -884,7 +888,7 @@ static int vertex_shader(const Nv2aVshSnapshot *program,ID3D11VertexShader **vs,
         "O main(V v){float4 inputs[16];");
     for(unsigned i=0;i<16;i++){snprintf(line,sizeof line,"inputs[%u]=v.a%u;",i,i);strcat(code,line);}
     strcat(code,"NvV n=nv_vertex(inputs);if(asuint(n.p.w)==0u)n.p.w=1.0;O o;o.p=float4((n.p.x/window.x*2-1)*n.p.w,(1-n.p.y/window.y*2)*n.p.w,n.p.z/window.z*n.p.w,n.p.w);"
-        "o.d0=n.d0;o.d1=n.d1;o.f=fogfactor(n.f.x);o.t0=n.t0;o.t1=n.t1;o.t2=n.t2;o.t3=n.t3;return o;}");
+        "o.d0=NV_COLOR_CLAMP?saturate(n.d0):n.d0;o.d1=NV_COLOR_CLAMP?saturate(n.d1):n.d1;o.f=fogfactor(n.f.x);o.t0=n.t0;o.t1=n.t1;o.t2=n.t2;o.t3=n.t3;return o;}");
     ID3DBlob *blob=compile(code,"vs_5_0");if(!blob)return 0;
     HRESULT hr=ID3D11Device_CreateVertexShader(g.device,ID3D10Blob_GetBufferPointer(blob),ID3D10Blob_GetBufferSize(blob),NULL,&g.vertex_shaders[slot].vs);
     D3D11_INPUT_ELEMENT_DESC desc[16]={0};
@@ -943,10 +947,43 @@ static int cached_constants(ID3D11Buffer *buffer,const void *data,size_t bytes,
     if(!upload_constants(buffer,data,bytes))return 0;
     memcpy(previous,data,bytes);*valid=1;return 1;
 }
+static D3D11_TEXTURE_ADDRESS_MODE diagnostic_address(uint32_t mode, uint32_t border_color)
+{
+    if (mode == 1) return D3D11_TEXTURE_ADDRESS_WRAP;
+    if (mode == 2) return D3D11_TEXTURE_ADDRESS_MIRROR;
+    if (mode == 4 && border_color) return D3D11_TEXTURE_ADDRESS_BORDER;
+    return D3D11_TEXTURE_ADDRESS_CLAMP;
+}
+
+static ID3D11SamplerState *diagnostic_sampler(const Nv2aHwTexture *texture, unsigned key)
+{
+    D3D11_SAMPLER_DESC desc = {0};
+    desc.Filter = (D3D11_FILTER)(((key&1)?0x10:0)|((key&2)?0x4:0)|((key&4)?0x1:0));
+    desc.AddressU = diagnostic_address(texture->addr_u, texture->border_color);
+    desc.AddressV = diagnostic_address(texture->addr_v, texture->border_color);
+    desc.AddressW = diagnostic_address(texture->addr_w, texture->border_color);
+    desc.MaxLOD = key&32 ? D3D11_FLOAT32_MAX : 0;
+    desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    desc.BorderColor[0] = (float)((texture->border >> 16)&255)/255;
+    desc.BorderColor[1] = (float)((texture->border >> 8)&255)/255;
+    desc.BorderColor[2] = (float)(texture->border&255)/255;
+    desc.BorderColor[3] = (float)(texture->border >> 24)/255;
+    for (unsigned i=0; i<64; ++i)
+        if (g.diagnostic_samplers[i].object && !memcmp(&g.diagnostic_samplers[i].desc,&desc,sizeof desc))
+            return g.diagnostic_samplers[i].object;
+    unsigned slot = g.diagnostic_sampler_next++ % 64;
+    ID3D11SamplerState *object = NULL;
+    if (FAILED(ID3D11Device_CreateSamplerState(g.device,&desc,&object))) return NULL;
+    RELEASE(g.diagnostic_samplers[slot].object,ID3D11SamplerState);
+    g.diagnostic_samplers[slot].desc=desc;
+    g.diagnostic_samplers[slot].object=object;
+    return object;
+}
+
 static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32_t count,const uint32_t *indices,uint32_t ni,const Nv2aVshSnapshot *program)
 {
     LARGE_INTEGER phase[7];
-    unsigned i;HRESULT hr;ID3D11ShaderResourceView *views[4]={0};ID3D11SamplerState *samplers[4];
+    unsigned i;HRESULT hr;ID3D11ShaderResourceView *views[4]={0};ID3D11SamplerState *samplers[4]={0};
     if(!nv2a_hw_enabled()||!s->color||!s->width||!s->height||s->width>1024||s->height>1024||!count||!ni||s->depth_scale<=0||(s->bpp!=2&&s->bpp!=4))return 0;
     if(!nv2a_hw_acquire_input(v,(size_t)count*vertex_stride)||
        !nv2a_hw_acquire_input(indices,(size_t)ni*4))return 0;
@@ -967,6 +1004,12 @@ static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32
         ID3D11ShaderResourceView_AddRef(views[i]);
         uint32_t mag=s->textures[i].filter>>24&15,min=s->textures[i].filter>>16&255;
         unsigned key=(min==2||min==4||min==6)|((mag==2)<<1)|((min==5||min==6)<<2)|((s->textures[i].addr_u==1)<<3)|((s->textures[i].addr_v==1)<<4)|((min>=3&&min<=6)<<5);
+        if(nv2a_v015_render_enabled()) {
+            samplers[i]=diagnostic_sampler(&s->textures[i],key);
+            if(!samplers[i])goto failed;
+            ID3D11SamplerState_AddRef(samplers[i]);
+            continue;
+        }
         if(!g.samplers[key]){D3D11_SAMPLER_DESC sd={0};sd.Filter=(D3D11_FILTER)(((key&1)?0x10:0)|((key&2)?0x4:0)|((key&4)?0x1:0));sd.AddressU=key&8?D3D11_TEXTURE_ADDRESS_WRAP:D3D11_TEXTURE_ADDRESS_CLAMP;sd.AddressV=key&16?D3D11_TEXTURE_ADDRESS_WRAP:D3D11_TEXTURE_ADDRESS_CLAMP;sd.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;sd.MaxLOD=key&32?D3D11_FLOAT32_MAX:0;sd.ComparisonFunc=D3D11_COMPARISON_NEVER;if(FAILED(ID3D11Device_CreateSamplerState(g.device,&sd,&g.samplers[key])))goto failed;}samplers[i]=g.samplers[key];
     }
     unsigned dkey=(s->depth_test?(s->depth_func>=0x200&&s->depth_func<=0x207?s->depth_func-0x200:7):7)|(!!s->depth_mask<<3);
@@ -1011,10 +1054,12 @@ static int draw(const Nv2aHwState *s,const void *v,uint32_t vertex_stride,uint32
       if(g.draws%5000==0){LARGE_INTEGER f;QueryPerformanceFrequency(&f);fprintf(stderr,"[HW PHASE] us/draw shader=%.1f target=%.1f texture=%.1f stream=%.1f uniforms=%.1f bind/draw=%.1f\n",g.phase_ticks[0]*1e6/f.QuadPart/5000,g.phase_ticks[1]*1e6/f.QuadPart/5000,g.phase_ticks[2]*1e6/f.QuadPart/5000,g.phase_ticks[3]*1e6/f.QuadPart/5000,g.phase_ticks[4]*1e6/f.QuadPart/5000,g.phase_ticks[5]*1e6/f.QuadPart/5000);memset(g.phase_ticks,0,sizeof g.phase_ticks);}}
 
     for(i=0;i<4;i++)RELEASE(views[i],ID3D11ShaderResourceView);
+    if(nv2a_v015_render_enabled())for(i=0;i<4;i++)RELEASE(samplers[i],ID3D11SamplerState);
     if(g.draws==1)fprintf(stderr,"[HW GPU] first batch submitted, %u vertices %u indices\n",count,ni);return 1;
 failed:
     check_device_removed("draw setup");
     for(i=0;i<4;i++)RELEASE(views[i],ID3D11ShaderResourceView);
+    if(nv2a_v015_render_enabled())for(i=0;i<4;i++)RELEASE(samplers[i],ID3D11SamplerState);
     return 0;
 }
 int nv2a_hw_draw(const Nv2aHwState *s,const Nv2aVshOutput *v,uint32_t count,const uint32_t *indices,uint32_t ni)
@@ -1045,7 +1090,7 @@ void nv2a_hw_shutdown(void)
     for(i=0;i<64;i++){RELEASE(g.trace_begin[i],ID3D11Query);RELEASE(g.trace_end[i],ID3D11Query);}
     for(i=0;i<CACHE_SIZE;i++){RELEASE(g.vertex_shaders[i].vs,ID3D11VertexShader);RELEASE(g.vertex_shaders[i].layout,ID3D11InputLayout);RELEASE(g.shaders[i].ps,ID3D11PixelShader);}
     for(i=0;i<TEXTURE_CACHE_SIZE;i++){RELEASE(g.textures[i].srv,ID3D11ShaderResourceView);free(g.textures[i].copy);free(g.textures[i].palette);}
-    for(i=0;i<64;i++)RELEASE(g.samplers[i],ID3D11SamplerState);for(i=0;i<16;i++)RELEASE(g.depth_states[i],ID3D11DepthStencilState);for(i=0;i<64;i++)RELEASE(g.blends[i].object,ID3D11BlendState);
+    for(i=0;i<64;i++){RELEASE(g.samplers[i],ID3D11SamplerState);RELEASE(g.diagnostic_samplers[i].object,ID3D11SamplerState);}for(i=0;i<16;i++)RELEASE(g.depth_states[i],ID3D11DepthStencilState);for(i=0;i<64;i++)RELEASE(g.blends[i].object,ID3D11BlendState);
     RELEASE(g.completion,ID3D11Query);RELEASE(g.vb,ID3D11Buffer);RELEASE(g.ib,ID3D11Buffer);RELEASE(g.rcbuf,ID3D11Buffer);RELEASE(g.auxbuf,ID3D11Buffer);RELEASE(g.vsbuf,ID3D11Buffer);RELEASE(g.raster,ID3D11RasterizerState);RELEASE(g.layout,ID3D11InputLayout);RELEASE(g.vs,ID3D11VertexShader);RELEASE(g.ctx,ID3D11DeviceContext);RELEASE(g.device,ID3D11Device);
     fprintf(stderr,"[HW GPU] draws=%llu syncs=%llu texture uploads=%llu direct=%llu\n",(unsigned long long)g.draws,(unsigned long long)g.syncs,(unsigned long long)g.uploads,(unsigned long long)g.direct_uploads);memset(&g,0,sizeof g);
 }
