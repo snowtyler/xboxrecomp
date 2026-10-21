@@ -27,7 +27,7 @@ if not h:raise OSError(c.get_last_error(),'OpenProcess')
 image=c.create_unicode_buffer(32768);length=w.DWORD(len(image))
 if not k.QueryFullProcessImageNameW(h,0,image,c.byref(length)):raise OSError(c.get_last_error(),'Query image')
 exe=Path(image.value).resolve();root=Path(__file__).resolve().parent/'build'/'RelWithDebInfo'
-if exe.parent!=root.resolve() or not exe.name.startswith('brute_force_e3_perf'):raise RuntimeError('Not a workspace candidate')
+if exe.parent!=root.resolve() or not exe.name.startswith(('brute_force_e3_perf','brute_force_e3_candidate')):raise RuntimeError('Not a workspace candidate')
 if not d.SymInitializeW(h,str(root),True):raise OSError(c.get_last_error(),'Symbols')
 def symbol(name):
     b=c.create_string_buffer(1120);c.c_uint32.from_buffer(b,0).value=88;c.c_uint32.from_buffer(b,80).value=1023

@@ -1,5 +1,11 @@
 # Next performance work: stable 60 FPS
 
+[Selected v0.15 integration](UPSTREAM_V015_INTEGRATION.md): candidate171 passed
+the 25-minute barrier gameplay/death/replay gate and GET invariants. Legacy
+vblank measured about 39 Hz; paced vblank and voice-lock changes are deferred.
+Opt-in vertex colour clamping did not remove yellow foliage in reviewed captures.
+Texture epochs qualification remains the next performance step.
+
 Quiet-GPU follow-up: [the completed candidate163 comparison](QUIET_GPU_170.md)
 records approximately 19.52 versus 28.64 flips/s in the two traced windows.
 Readback Map/poll/driver CPU falls from an estimated 19.23 to 10.86 ms/flip;

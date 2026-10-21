@@ -47,8 +47,10 @@ add_executable(nv2a-diagnostic-render-test diagnostic_render_test.c
 target_include_directories(nv2a-diagnostic-render-test PRIVATE ../../src/kernel)
 target_link_libraries(nv2a-diagnostic-render-test PRIVATE d3d11 dxgi dxguid d3dcompiler)
 target_compile_options(nv2a-diagnostic-render-test PRIVATE /UNDEBUG)
-foreach(mode RANGE 0 1)
-    add_test(NAME nv2a-v015-render-${mode} COMMAND nv2a-diagnostic-render-test)
-    set_tests_properties(nv2a-v015-render-${mode} PROPERTIES ENVIRONMENT
-        "RECOMP_NV2A_COLOR_CLAMP=${mode};RECOMP_NV2A_V015_RENDER=${mode}")
+foreach(clamp RANGE 0 1)
+  foreach(mode RANGE 0 1)
+    add_test(NAME nv2a-v015-clamp-${clamp}-render-${mode} COMMAND nv2a-diagnostic-render-test)
+    set_tests_properties(nv2a-v015-clamp-${clamp}-render-${mode} PROPERTIES ENVIRONMENT
+        "RECOMP_NV2A_COLOR_CLAMP=${clamp};RECOMP_NV2A_V015_RENDER=${mode}")
+  endforeach()
 endforeach()

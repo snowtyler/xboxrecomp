@@ -140,6 +140,8 @@ with (p / f"analysis/{args.name}.stdout.log").open("w") as out, (p / f"analysis/
     try:
         deadline = start + args.seconds + 10
         while proc.poll() is None:
+            if state_proc and state_proc.poll() not in (None, 0):
+                raise RuntimeError("Guest state observer failed; inspect its metadata")
             elapsed = time.monotonic() - start
             if args.inspect_from >= 0 and not inspected and elapsed >= args.inspect_from:
                 inspected = True

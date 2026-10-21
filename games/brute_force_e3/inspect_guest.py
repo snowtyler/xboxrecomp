@@ -19,7 +19,7 @@ if not h:raise OSError(c.get_last_error(),'OpenProcess')
 path=c.create_unicode_buffer(32768);length=w.DWORD(len(path))
 if not k.QueryFullProcessImageNameW(h,0,path,c.byref(length)):raise OSError(c.get_last_error(),'Query image')
 exe=Path(path.value).resolve();root=Path(__file__).resolve().parent/'build'/'RelWithDebInfo'
-if exe.parent!=root.resolve() or not (exe.name.startswith('brute_force_e3_perf') or exe.name=='brute_force_e3_prototype.exe'):raise RuntimeError('Not a workspace performance test')
+if exe.parent!=root.resolve() or not (exe.name.startswith(('brute_force_e3_perf','brute_force_e3_candidate')) or exe.name=='brute_force_e3_prototype.exe'):raise RuntimeError('Not a workspace performance test')
 if a.tid is None:
     class ThreadEntry(c.Structure):
         _fields_=[('size',w.DWORD),('usage',w.DWORD),('tid',w.DWORD),('pid',w.DWORD),('priority',w.LONG),('delta',w.LONG),('flags',w.DWORD)]

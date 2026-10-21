@@ -31,7 +31,7 @@ def observe(pid, output, seconds, interval):
             raise OSError(c.get_last_error(), "Query image")
         root = Path(__file__).resolve().parent / "build/RelWithDebInfo"
         exe = Path(image.value).resolve()
-        if exe.parent != root.resolve() or not exe.name.startswith("brute_force_e3_perf"):
+        if exe.parent != root.resolve() or not exe.name.startswith(("brute_force_e3_perf", "brute_force_e3_candidate")):
             raise RuntimeError("Not a workspace qualification candidate")
         if not dbg.SymInitializeW(handle, str(root), True):
             raise OSError(c.get_last_error(), "Symbols")

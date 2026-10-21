@@ -1,9 +1,9 @@
 # Selected v0.15.0 integration
 
-Work in progress, October 20, 2026. Baseline `4b6079b`; branch
+Completed October 21, 2026. Baseline `4b6079b`; branch
 `codex/integrate-v015`. Upstream tag `v0.15.0` resolves to `6376eb8`.
-Each numbered item has its own commit and validation below. Pending checks are
-not qualification. Candidate157 and all earlier binaries are retained.
+Each numbered item has its own commit and validation below. Unavailable
+measurements and deferred ports are explicit. Candidate157 and all earlier binaries are retained.
 
 ## 1. Kernel callback stack and registers
 
@@ -17,7 +17,11 @@ callback's EAX result; dispatcher status results remain their own.
 The other original `g_esp += 12` sites are `bridge_run_thread_inline`, the
 first-call PsCreateSystemThreadEx path and the first-call PsCreateSystemThread
 path (original lines 502, 622, 7954). Each invokes an Xbox system thread start
-routine with two arguments, a stdcall `ret 8` contract, not a cdecl function.
+routine with two arguments, a stdcall contract (`ret 8` if it returns), not
+a caller-cleaned cdecl site. The logged Brute Force target is 00326B6D: it
+reads `[ebp+8]`/`[ebp+0xC]` and tail-transfers to thread termination rather than
+showing a returning `ret 8`. Its ABI metadata's cdecl label is explicitly a
+0.5-confidence default, not evidence of caller cleanup.
 All now restore their pre-frame ESP rather than assuming additional cleanup;
 first-thread register inheritance is retained. These paths rarely return.
 
@@ -27,7 +31,7 @@ exercises both stdcall and defensive cdecl return behavior, then executes a
 caller POP ESI against a stack canary. The DPC shares the tested save/restore
 helper; asynchronous dispatch policy is unchanged. MSVC RelWithDebInfo native fixture: zero failures (six callback cases,
 including the real file-APC path); logs in ignored `analysis/v015-kernel-*`.
-The final fresh-candidate gameplay/death/replay gate is still pending.
+The final fresh-candidate gameplay/death/replay gate passed; see validation below.
 
 ## 2. POP ESP
 
@@ -35,8 +39,8 @@ Confirmed the old macro assigns ESP before incrementing it. Ported `54b64ca`:
 read into a temporary, increment the old stack pointer, then assign destination.
 The current generated tree contains one `POP32(esp, esp)` in `recomp_0082.c`.
 Regeneration matters for the copied runtime header; the emitted instruction
-statement itself does not change. Refreshed that ignored header now and will
-regenerate separately in item 3. Added upstream stack-operand fixture and a
+statement itself does not change. Refreshed that ignored header and regenerated
+separately in item 3. Added upstream stack-operand fixture and a
 lifter assertion. MSVC stack fixture passes push/pop ESP, the round-to-integer
 idiom, ordinary POP, memory stack operands, LEAVE and PUSHAD/POPAD. The focused
 lifter test passes.
@@ -93,12 +97,12 @@ unlike standalone FPTAN: native tan(1) and the pi66 sin/cos quotient differ by
 one ULP. Applied the same 1e-9 transcendental tolerance to that sequence only;
 status/branch registers remain exact. The 1,249-vector sequence and full CPU
 differential recheck pass. Final suite: **608 passed, 136 subtests passed,
-one existing sanitizer skip**. All **84 native tests pass**, including the
+one existing sanitizer skip**. All **92 final native tests pass**, including the
 91,344-schedule GET/control combinations, semaphore, raster, regenerated ABI,
 kernel callback, x87 positive/negative-control, APU and XAudio2 fixtures.
 POSIX-only projects are inapplicable on this Windows host; the old v0.14
 aggregate duplicates component fixtures. Logs: `analysis/v015-lifter-suite-final.log`
-and `analysis/v015-native-tests.log`. Final fresh-game gate remains pending.
+and `analysis/v015-native-final-tests.log`. The final fresh-game gate passed.
 
 ## 4. Vblank measurement
 
@@ -154,7 +158,7 @@ Raw series, frames, launch receipts, guest states and hashes are in ignored
 `analysis/v015-vblank-summary.json` and `v015_vblank_original_{notify,poll}*`.
 The normal-barrier full gate runner `verify_upstream_v015.ps1` uses a fresh save
 copy and records EXE/PDB hashes; it clears rendering diagnostics and keeps the
-qualified GET monitor requirements. Final fresh-candidate gate: pending.
+qualified GET monitor requirements. The final fresh-candidate barrier gate passed.
 
 ## 5. Rendering leads
 
@@ -164,7 +168,8 @@ for vertex-output saturation. `RECOMP_NV2A_COLOR_CLAMP=1` now independently
 clamps both colours at the CPU output and both transformed/raw hardware vertex
 boundaries, before interpolation. It is off when unset, empty or `0`; the HLSL
 compile-time constant folds out the disabled branch. This is a diagnostic, not
-a promoted rendering fix. Gameplay foliage comparison: pending fresh candidate.
+a promoted rendering fix. Candidate171's barrier-only comparison below did not
+remove the shared yellow-foliage defect.
 
 `RECOMP_NV2A_V015_RENDER=1` independently opts into the other missing semantics:
 CPU and D3D11 MIRROR/BORDER addressing (including border-source selection and
@@ -173,6 +178,9 @@ attributes in both hardware packing and CPU vertex input, and SET_FOG_PLANE /
 SET_EYE_POSITION writes to shared constants c[57]/c[56]. The sampler cache keys
 the full descriptor including border colour and retains per-draw references
 across cache eviction. Ordinary launch clears both diagnostic flags.
+The colour-source form of BORDER is implemented; the non-colour border-source
+case retains the upstream clamp fallback, rather than claiming border-texel data
+support.
 
 Near-plane clipping is already present in our `nv2a_clip.h` and hardware D3D11
 clip volume. The CPU path reconstructs from window bounds/depth range, not
@@ -187,8 +195,8 @@ and changing border colour changes output (cache-key coverage). Two native
 method tests verify c[56]/c[57] via the real method dispatcher. Two compiler-backed
 tests use the actual private fetch/coordinate function bodies to check all 16
 current attributes, zero-stride declared arrays, negative mirror and wrap.
-All 87 native tests passed before adding the two constant-method checks, which
-also pass. Launcher regression waits until the baseline probe releases its lock.
+Final native suite: 92 passed, including all four independent diagnostic-flag
+combinations and both constant-method checks. Launcher regression passed.
 
 ## 6. APU
 
@@ -201,7 +209,7 @@ Master mute, stale-PCM guard and non-consuming inspection are retained.
 
 The new voice fixture tests mono/stereo wide ADPCM, refuses values above the
 buffer limit and checks every sample of a gain transition. It passes with the
-rest of the 87-test native suite. This is not an audio-rate measurement or a
+rest of the final 92-test native suite. This is not an audio-rate measurement or a
 claim to resolve the 88% production shortfall.
 
 **Per-voice locks deferred.** The retained WPR precise export
@@ -246,6 +254,81 @@ are unchanged. Texture epochs qualification remains the next performance step.
 
 ## Final validation and binary identities
 
-Pending: lifter/differential, native fixtures, launcher regression, separate
-regeneration/ABI/dispatch accounting, candidate hashes and monitored normal-barrier
-gameplay/death/replay evidence (lag at most 0x3FC, zero far/read-past decisions).
+Candidate171 is an optimized MSVC RelWithDebInfo build, with distinct basename
+`brute_force_e3_candidate171.exe`/PDB. EXE SHA-256:
+`3b1b3822e3a879ddbc8d7fa6f127bce5bd1b404e2b9659de1ddc8527114a0b37`.
+PDB SHA-256:
+`f6e8a73dc77b1269e8e21e26a4546f4bf1d15130fbfd64e624db43cf4452961b`.
+All 318 earlier retained EXE/PDB identities were recorded before building it
+and verified unchanged afterwards, including candidate157's named prototype.
+
+Launcher-environment regression passed, including explicit GET rollback and
+both rendering diagnostic flags absent. Qualification tools now accept candidate
+basenames as well as the older perf names, still restricted to the workspace
+build directory. The observer's live read-only preflight passed. Probe execution
+fails immediately if that observer fails. An initial legacy-shell launch and
+the original perf-only observer attempt are excluded from qualification.
+
+The full normal-barrier gameplay/death/replay gate **passed** as
+`v015171_barrier_gate2`, using isolated saves, default GET progress and its
+monitor. It completed 1500.4 seconds; exit code 3 is the native watchdog, with
+neither host timeout nor an early stop. It recorded **3,596,381,192 ring reads**,
+14,057,254 publications and **33,311 monitored event-path decisions**. Maximum
+lag was **0x3FC**; far reads, invalid/untrusted GET, freezes, backward jumps,
+ring calls and read-past decisions were all **zero**.
+
+Guest state proves failure/death on campaign 22917504 at 626.964 seconds,
+the Squad Killed predicate, replay preparation then enqueue/consume/reload,
+and campaign 23024064 with cleared failure state and advancing flips. Reviewed
+completed frames include the Squad Killed menu (approximately 900 s) and the
+new campaign's rendered HUD/movement/firing (1320 s and a read-only completed
+presenter copy). The final reader/inspection data and monitor show no errors.
+The native prepare-to-enqueue gap is again ordinary intro playback, not a
+newly inferred stall.
+
+Final checks: **608 lifter tests, 136 subtests, 979 CPU differential snippets**
+passed, with one existing unsupported sanitizer skip; **93 title/disassembler**
+tests and **92 native tests** passed. The native run includes GET's 91,344
+schedules, semaphore, raster/clipping, regenerated ABI, kernel callback, APU,
+XAudio2 and field-pin fixtures. An isolated 15-second backend clock smoke test
+played 720,000 frames with zero underruns; this does not measure game production.
+Nineteen protected walker/completion/publication/IRQ/legacy-vblank function bodies
+match `4b6079b` exactly (`analysis/v015-policy-check.json`).
+
+### Colour-clamp pixel diagnostic
+
+Both arms used candidate171, normal barriers, GET progress/monitor on, coalescing,
+IRQ gate and the other v0.15 rendering flag off. Separate copies of the same saves
+were used. Only `RECOMP_NV2A_COLOR_CLAMP=0/1` differed. All six scripted inputs
+were acquired at their exact requested guest flips (33,000 through 33,500), and
+all seven completed-frame captures through 33,700 were retained and hashed.
+
+Reviewed pairs at **33,200, 33,400 and 33,700** show bright yellow foliage in
+both arms. The first two have closely comparable camera/HUD state and matching
+ammo (48/500 and 40/500 respectively). There are animation differences; by
+33,700, the camera/scene has drifted and ammo differs by one round (32 versus 33).
+Flip-indexed input alone therefore does not guarantee identical scene state.
+The clamp **does not visibly resolve the defect** in these captures; this is not
+an exact pixel equivalence claim or proof that no other draw benefits.
+
+Published off/on monitor totals were 1,413,502,089 / 1,654,678,440 reads and
+10,960 / 11,090 event decisions. Both report max lag 0x3FC and zero adverse
+counters. These were controlled-stop diagnostics, **not watchdog qualification**.
+The off arm lacks an end inspection; its last published counters cannot cover
+the final unreported interval. The on arm has a successful live inspection and
+error-free state reader. An initial post-collection attempt incorrectly applied
+the watchdog-only analyzer to the off arm; the rejected result is retained, and
+the recovered frames/counters have a separate diagnostic summary. No failed
+qualification has been relabeled as a pass.
+
+The default-path 25-minute gate above does not qualify either rendering flag.
+All rendering changes remain opt-in. Raw receipts, controls, frame hashes and
+review are in ignored `analysis/v015-clamp-pair.json`; the final evidence index
+is `analysis/v015-final-artifacts.json`. No timing comparison follows from these
+runs. Texture epochs qualification remains the next performance step; the
+shared rendering defect needs a separate draw-level investigation.
+
+The final index records 260 artifacts, including candidate/helper/native
+EXE/PDB identities, test logs, regeneration, gate evidence and diagnostic frames.
+Its SHA-256 is
+`160074a3b34ad5160f27851e9ab0db5c17d99441be42e5e58004402d18624ac5`.
