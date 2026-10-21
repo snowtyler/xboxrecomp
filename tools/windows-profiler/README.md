@@ -4,6 +4,22 @@ This helper allows the approved user to start bounded WPR/Nsight recordings
 without another UAC prompt after one administrator-approved installation.
 It does not resume the game route or qualify a game build.
 
+Any process running as the installing user can start these elevated system-wide
+traces and read their results. The traces can include other processes' names,
+command lines and stacks. The pipe authenticates the user, not a particular app
+or a human approval for each recording. Uninstall the helper when the profiling
+campaign ends, using the removal procedure below.
+
+The v0.15 hardening checks for at least **20 GiB free** on the protected output
+volume before accepting each capture and again in its worker before recording.
+Low space refuses the capture; it never deletes existing evidence. Recordings
+require administrator access to delete, and restarting sessions has no lifetime
+capture-count limit. This free-space threshold is not a per-capture byte cap:
+other applications or a growing capture can still consume the reserve.
+An administrator should archive/delete old recordings between campaigns.
+Rebuild/reinstall to deploy this check; the original installed binary hashes
+in the validation section describe the earlier version.
+
 ## Scope
 
 The on-demand `BruteForceProfiler-Collector` task runs the installed native launcher

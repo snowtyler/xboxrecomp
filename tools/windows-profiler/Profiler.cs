@@ -108,6 +108,14 @@ internal static class Profiler {
         if(WindowsIdentity.GetCurrent().Owner.Value!="S-1-5-32-544") throw new UnauthorizedAccessException("Administrator default object owner required");
     }
     internal static bool ValidCommand(string text) { return Array.IndexOf(Commands,text)>=0; }
+    internal const long CaptureReserveBytes = 20L * 1024 * 1024 * 1024;
+    internal static void RequireCaptureSpace(long available) {
+        if(available<CaptureReserveBytes)
+            throw new IOException("Capture refused: at least 20 GiB free on the protected recording volume is required. An administrator must archive/delete old recordings.");
+    }
+    static void CheckCaptureSpace() {
+        RequireCaptureSpace(new DriveInfo(Path.GetPathRoot(Root)).AvailableFreeSpace);
+    }
     static int RunWpr(string args,string directory,string logName,int timeout) {
         using(var child=new Child(Wpr,args+" -instancename "+Instance,Path.Combine(directory,logName))) return child.Wait(timeout);
     }
@@ -123,6 +131,7 @@ internal static class Profiler {
         Save(receipt,state);
         try {
             if(File.Exists(cancel)) { state["status"]="cancelled";return; }
+            CheckCaptureSpace(); // Repeat at actual start, before either recorder.
             if(cpu) {
                 // Named instance keeps cleanup separate from unrelated WPR sessions.
                 if(RunWpr("-start CPU -filemode",dir,"wpr-start.log",15000)!=0) throw new IOException("WPR start failed; see protected log");
@@ -227,6 +236,7 @@ internal static class Profiler {
                         else if(command=="stop" && worker!=null) File.WriteAllText(Path.Combine(Root,"recordings",current,"cancel.flag"),"Stop requested");
                         else if(Array.IndexOf(Modes,command)>=0) {
                             if(ending || worker!=null || captures>=4) throw new InvalidOperationException("Session ending, busy, or capture limit reached");
+                            CheckCaptureSpace(); // No output directory/job if the volume is low.
                             current=Guid.NewGuid().ToString("N");string dir=Path.Combine(Root,"recordings",current);Directory.CreateDirectory(dir);
                             // Only constants and a server-generated GUID enter arguments.
                             workerJob=new Job();worker=Process.Start(new ProcessStartInfo(Exe,"worker "+command+" "+current) {UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=Root});workerJob.Add(worker);
@@ -280,6 +290,13 @@ internal static class Profiler {
         }
     }
     static int Tests() {
+        foreach(long available in new long[] {-1,0,CaptureReserveBytes-1}) {
+            bool refused=false;
+            try { RequireCaptureSpace(available); } catch(IOException) { refused=true; }
+            if(!refused) throw new Exception("Low-space capture accepted");
+        }
+        RequireCaptureSpace(CaptureReserveBytes);
+        RequireCaptureSpace(CaptureReserveBytes+1);
         foreach(string command in Commands) if(!ValidCommand(command)) throw new Exception("Valid command rejected");
         foreach(string command in new[]{"","CPU30","cpu31","cpu30 & whoami","../../cpu3","cpu3\nshutdown","powershell","gpu0",new string('x',33)}) if(ValidCommand(command)) throw new Exception("Invalid command accepted");
         using(var stream=new MemoryStream(Encoding.ASCII.GetBytes("cpu3\n"))) if(ReadRequest(stream)!="cpu3") throw new Exception("Framing");

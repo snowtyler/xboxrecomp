@@ -114,7 +114,20 @@ Pending.
 
 ## 7. Profiling collector
 
-Pending.
+Documented that any process as the installing user can trigger elevated
+system-wide traces and read results containing other processes' names, command
+lines and stacks; recommend uninstalling after the campaign. Added a 20 GiB
+free-space prerequisite both before broker acceptance and before worker capture.
+Refusal creates no capture job at acceptance and never deletes retained files.
+The worker rechecks before starting WPR/Nsight. This is a free-space guard, not
+a lifetime/session byte cap. Self-tests cover negative/zero/one-byte-below,
+exact and one-byte-above threshold. Separate .NET Framework x64 diagnostic
+`ProfilerV015.exe`/PDB builds and all self-tests pass, including live pipe
+round-trip, identity checks and injection rejection. SHA-256 EXE:
+`71a3bfc236ea586f1f8526c3e7198a155daeb0b09f31b98229d69041432bdf88`;
+PDB: `6c4a7c86bf54c10d4799959b0ae4621ad9004871f39466d3b865c20c0aceb74f`.
+The previously installed protected helper remains untouched; deployment of the
+changed privileged binary requires the existing administrator install procedure.
 
 ## Deliberate omissions
 
