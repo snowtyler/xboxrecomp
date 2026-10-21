@@ -1,9 +1,10 @@
 # Brute Force E3 prototype recompilation
 
-GET progress is now enabled by default on the integrated v0.14 build, after
-normal-barrier gameplay/death/replay qualification. The named prototype uses
-candidate157; see [GET default promotion](GET_DEFAULT_PROMOTION.md) for the
-results and rollback. Coalescing and IRQ gating remain off. Current gameplay
+The named prototype now uses candidate171, with selected v0.15 fixes and default
+GET progress, after normal-barrier gameplay/death/replay qualification. See
+[candidate171 promotion](CANDIDATE171_PROMOTION.md) and the historical
+[GET default promotion](GET_DEFAULT_PROMOTION.md) for results and rollback.
+Coalescing and IRQ gating remain off. Current gameplay
 performance and audio quality still need measurement. Assets and generated/build
 outputs must be supplied/regenerated locally as described below.
 
@@ -51,10 +52,11 @@ generator. MSVC 2022 Build Tools and the Windows SDK are installed on this machi
 The script configures explicitly and invokes MSBuild from that installation.
 Automatic regeneration is disabled because it stalled during initial setup;
 run this script again after regenerating code to refresh the source list.
-Build the current prototype candidate with:
+Build experiments with a fresh candidate basename; retained candidates and the
+named prototype must not be rebuilt in place. For example, select an unused N:
 
 ```powershell
-.\games\brute_force_e3\build.ps1 -Optimize -OutputName brute_force_e3_prototype
+.\games\brute_force_e3\build.ps1 -Optimize -OutputName brute_force_e3_candidateN
 ```
 
 Use `RelWithDebInfo`: some runtime libraries force `/O2`, which conflicts
@@ -104,8 +106,9 @@ Candidate156 passed a 25-minute audio-enabled normal-barrier run with GET on:
 rendered gameplay, movement, aiming, firing, combat damage, Squad Killed,
 mission restart, and movement/firing after replay. Candidate157 changes the GET
 default and passed separate default-on and explicit-off probes. The named
-prototype is byte-identical to candidate157 and passed owned-window launch/close
-verification. See `GET_DEFAULT_PROMOTION.md` for the exact qualification chain.
+prototype originally used candidate157. It now matches candidate171, which
+passed a fresh full gate and owned-window launch/close verification; see
+`CANDIDATE171_PROMOTION.md`. Candidate157 and the old named files remain retained.
 
 This is an experimental playable build. Current gameplay performance has not
 been qualified; older builds measured roughly 8–28 FPS in selected scenes.
