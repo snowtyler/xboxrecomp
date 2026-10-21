@@ -102,7 +102,59 @@ and `analysis/v015-native-tests.log`. Final fresh-game gate remains pending.
 
 ## 4. Vblank measurement
 
-Pending: measure the retained implementation before considering paced vblank.
+Measured the **unchanged candidate163** counter `g_vblank_total` by read-only
+PDB symbol access, with host QPC timestamps once per second. Each process used
+a fresh copy of the same saves and the reviewed normal-barrier route, GET on,
+monitor/IRQ/coalescing/render diagnostics/epochs off. `RECOMP_VBLANK=1` remained
+set. The second process omitted `RECOMP_NV2A_NOTIFY` entirely, rather than setting
+it to `0`. No runtime instrumentation or timer code changed for these runs.
+
+| Setting and verified state | Counter delta | QPC seconds | Hz |
+|---|---:|---:|---:|
+| Notify on, title screen | 2,933 | 74.5459 | **39.3449** |
+| Notify on, living HUD gameplay | 2,885 | 74.5652 | **38.6910** |
+| Notify off, title screen | 2,963 | 74.5431 | **39.7488** |
+| Notify off, gameplay | — | — | **Not reached** |
+
+Reviewed completed title/HUD frames at both ends; gameplay guest state has a
+living campaign and stable roots. The notify-off process remained on the title
+path, SDK flip serial 8,055 at both 620 and 695 seconds. Its later 73.9015-second
+counter interval measured 39.9315 Hz, but this is **stalled title**, not gameplay.
+No notify-off gameplay rate is claimed. The runs lasted 710 seconds each, including
+the title hold, menu navigation and intro playback. Source editing, regeneration
+and fixture checks overlapped parts of collection; these are tick-rate diagnostics,
+not clean-host performance comparisons.
+
+The rate is materially below 60 Hz; the exact 32 Hz inference is not supported
+on this host. The legacy tick schedules `now + 16` on a coarse-clock/10 ms timer
+loop; notify wakes and ISR/DPC work also affect its cadence. The count is ticks,
+not proof of ISR acceptance or guest completion at the same rate.
+
+**Paced-vblank assessment: not ported in this integration.** `5bb9e04` contains
+both pacing and substantial interrupt/acknowledgement changes. An isolated opt-in
+port should use an absolute QPC-nanosecond 60 Hz schedule, a high-resolution
+waitable timer, PCRTC/PMC enable checks and a separate acknowledgement watcher,
+with no DISPATCH gate. Our notify mode already implements W1C in
+`irq_write_veh`, with child-status clearing deasserting PMC, and excludes these
+registers from the legacy ack thread. Copying the upstream plain-RAM ack watcher
+alongside it could acknowledge a freshly raised source prematurely. Adaptation
+needs register-level tests for both notify modes, masked/unmasked delivery,
+delayed DPC acknowledgement and shutdown before a live paced comparison. Retain
+the qualified vblank behavior here; this measured prerequisite belongs before
+the later 60 FPS pacing/flip-hold work, not as an unqualified default change.
+
+Guest dependencies: the NV2A ISR/DPC drives SDK vertical-blank events used by
+presentation-interval/frame-limiter code; the field pin at port 0x80C0 derives
+bit 5 from this counter. Brute Force reads that pin at 003A4C7C/003A4F3D and
+stores the result in device+0x1D0. These are vblank timing dependencies, distinct
+from release/semaphore waits. No presentation-interval setting, exact FPS cap,
+audio consequence or fixed speedup is inferred from this rate alone.
+
+Raw series, frames, launch receipts, guest states and hashes are in ignored
+`analysis/v015-vblank-summary.json` and `v015_vblank_original_{notify,poll}*`.
+The normal-barrier full gate runner `verify_upstream_v015.ps1` uses a fresh save
+copy and records EXE/PDB hashes; it clears rendering diagnostics and keeps the
+qualified GET monitor requirements. Final fresh-candidate gate: pending.
 
 ## 5. Rendering leads
 
@@ -159,7 +211,12 @@ establish or reject contention there. Source confirms `voice_lock` takes
 `d->lock` and the producer holds it while mixing; that is a lead, not measured
 blocked time. `8627159` also changes protection for FE list/voice mutation
 relative to the mixer; it is not treated as a low-risk unconditional port.
-Obtain a targeted precise-wait export before changing that synchronization.
+The broader retained `wpr162-waits-export/CPU_Usage_(Precise)_Thread_Delays.csv`
+is truncated at row 46,334 (17 fields versus 56); it is not a complete alternative.
+No voice-lock/producer stack was found in its valid prefix, which cannot rule
+out waits in the missing threads. The checked prefix and incompleteness are
+recorded in `analysis/v015-apu-waits.json`. Obtain a targeted precise-wait export
+before changing that synchronization.
 
 ## 7. Profiling collector
 
