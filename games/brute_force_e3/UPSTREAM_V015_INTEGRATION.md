@@ -43,8 +43,62 @@ lifter test passes.
 
 ## 3. Lifter applicability and regeneration
 
-Pending. `audit_v015_instructions.py` records whole-disassembly counts separately
-from existing generated-function ranges. Decoded data is not runtime evidence.
+Ported `e1864d5` (lazy flags image, PUSHFD/POPFD and Pentium III CPUID),
+`facb626` (BP/SP sign extension) and `b3c90cf` (66-bit-pi x87 trig helpers).
+The flags image is thread-local, initialized to 0x202. Existing MXCSR, LAHF
+carry handling and boundary/ABI analysis remain intact. AF is still not fully
+modeled; unsupported PUSHFD flag reconstruction retains explicit diagnostics.
+
+`audit_v015_instructions.py --decoded` checks the retained whole disassembly,
+then decodes the existing dispatch functions using the same metadata/coalescence
+as regeneration, excluding the manual override and deduplicating addresses.
+
+| Pattern | Whole disassembly | Decoded dispatch functions |
+|---|---:|---:|
+| PUSHFD | 116 | 16 |
+| POPFD | 89 | 8 |
+| CPUID | 3 | 2 |
+| MOVSX r32, BP/SP | 4 | 4 |
+| FSIN | 25 | 25 |
+| FCOS | 33 | 33 |
+| FSINCOS | 16 | 16 |
+| FPTAN | 6 | 6 |
+| XADD, unprefixed | 6 | 5 |
+| LOCK XADD | 0 | 0 |
+| LAHF | 93 | 4 |
+| POP ESP | 103 | 1 |
+
+Counts describe static decode, not execution. Whole-section decoding includes
+data; even a translated body can retain unreachable decoded bytes. Three LAHF
+sites immediately follow a carry setter. Our existing unconditional LAHF carry
+reader check already covers `e3f6373`; retained it without weakening the check.
+All five applicable XADD sites are unprefixed (`0FC1`, no F0 prefix), unlike the
+earlier review's wording. The v0.14 sum-flag port already covers them. The
+LOCK-only declaration fix `6ac4bba` is therefore not imported for this title.
+
+Regenerated separately into ignored `analysis/v015-generated/`, with zero
+translation failures. The old and new dispatch entries are identical (26,463),
+as are all 26,701 function definitions including aliases. Archived the previous
+tree as `analysis/v015-pre-regeneration.zip` (its header already has item 2),
+and recorded the archive/generated hashes and census in
+`analysis/v015-generated-manifest.json`. Replaced the ignored generated tree,
+restored GET, SDK, loader/audio and guest-state diagnostics, and refreshed nine
+ABI fixture bodies. No new discovery or disassembly boundaries were imported.
+
+Focused flags/CPUID/trig/LAHF tests passed (54 tests, 24 subtests), with the
+MOVSX fixture added afterwards. The first full run passed 607 tests and 136
+subtests, skipped the existing unsupported MSVC sanitizer case, and exposed one
+FPTAN differential mismatch. Its live tangent value used an exact comparison,
+unlike standalone FPTAN: native tan(1) and the pi66 sin/cos quotient differ by
+one ULP. Applied the same 1e-9 transcendental tolerance to that sequence only;
+status/branch registers remain exact. The 1,249-vector sequence and full CPU
+differential recheck pass. Final suite: **608 passed, 136 subtests passed,
+one existing sanitizer skip**. All **84 native tests pass**, including the
+91,344-schedule GET/control combinations, semaphore, raster, regenerated ABI,
+kernel callback, x87 positive/negative-control, APU and XAudio2 fixtures.
+POSIX-only projects are inapplicable on this Windows host; the old v0.14
+aggregate duplicates component fixtures. Logs: `analysis/v015-lifter-suite-final.log`
+and `analysis/v015-native-tests.log`. Final fresh-game gate remains pending.
 
 ## 4. Vblank measurement
 

@@ -199,7 +199,10 @@ def cases():
                                      "mov eax, 0", "jae done", "mov eax, 1",
                                      "done: mov ecx, eax"])
     add("seq_wait_sahf_jne", three + ["fcompp", "fwait", "fnstsw ax", "sahf"] + _jump("ne"))
-    add("seq_fptan_sahf_jp", two + ["fptan", "fwait", "fnstsw ax", "sahf"] + _jump("p"))
+    # The status/branch registers remain exact; the live tangent stack value
+    # uses the same transcendental tolerance as standalone FPTAN above.
+    # Pi66's sin/cos quotient differs from host FPTAN by an ulp even at x=1.
+    add("seq_fptan_sahf_jp", two + ["fptan", "fwait", "fnstsw ax", "sahf"] + _jump("p"), tol=1e-9)
 
     for cmp in ("fcomi", "fcomip", "fucomi", "fucomip"):
         pre = two + [f"{cmp} st, st(1)"]
